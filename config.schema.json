@@ -3,7 +3,7 @@
   "pluginType": "platform",
   "singular": true,
   "headerDisplay": "Exposes [Delta Dore](https://www.deltadore.fr/) hardware to HomeKit through a **Tydom** gateway. Lights, shutters, thermostats, garage doors, contact and smoke sensors and Tyxal alarms are discovered automatically — nothing has to be listed by hand.",
-  "footerDisplay": "Per-device options live under **Device settings**, keyed by the numeric device id shown in the Homebridge log at startup (`Found new tydom device ... with deviceId=1234567`). Full reference in the [wiki](https://github.com/mgcrea/homebridge-tydom/wiki/Configuration).",
+  "footerDisplay": "Per-device options live under **Device settings**, keyed by the numeric device id shown in the Homebridge log at startup (`Found new tydom device ... with deviceId=1234567`). Full reference in the [README](https://github.com/maximekduval/homebridge-tydom#device-settings) and the [upstream wiki](https://github.com/mgcrea/homebridge-tydom/wiki/Configuration).",
   "schema": {
     "type": "object",
     "properties": {
