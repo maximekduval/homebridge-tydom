@@ -31,5 +31,9 @@ on `main` (accessories are kept when a scan reports no devices).
 - A short disconnection is logged as one "Reconnected ... after Ns" line instead
   of three warnings. A warning is logged when the gateway stays unreachable, and
   an info line when it is back.
+- Update `zod` to 4.6.7 for its security fix (GHSA-mrhx-c7xc-m3w5, memory
+  exhaustion on large collections) and `tydom-client` to 0.16.1. Update the
+  development tools (vitest, oxfmt, tsdown, oxlint, tsx, homebridge) so
+  `npm audit` reports no vulnerability.
 - Published on npm as `homebridge-tydom-mk`, with release notes in the Homebridge
   UI taken from this changelog.
