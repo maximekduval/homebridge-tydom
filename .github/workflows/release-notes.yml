@@ -48,12 +48,12 @@ jobs:
       # A release event checks out its tag, so the changelog is the one the
       # release was made from. A manual run checks out the default branch.
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
 
