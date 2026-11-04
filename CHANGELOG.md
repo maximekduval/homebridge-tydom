@@ -5,6 +5,13 @@ Changes of `homebridge-tydom-mk`, the fork of
 history of the versions before the fork is in the
 [upstream changelog](https://github.com/mgcrea/homebridge-tydom/blob/main/CHANGELOG.md).
 
+## 1.0.1
+
+- The settings page of the plugin in the Homebridge UI links to the README of
+  this fork, next to the upstream wiki.
+- First version released from GitHub: staged on npm by the Release workflow and
+  approved with 2FA. No change in behaviour.
+
 ## 1.0.0
 
 First version of the fork, based on upstream 0.34.1 and the fix that follows it

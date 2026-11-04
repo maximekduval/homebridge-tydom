@@ -1,7 +1,7 @@
 {
   "name": "homebridge-tydom-mk",
   "displayName": "Homebridge Tydom MK",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Homebridge plugin for Tydom devices by Delta Dore (Tyxal, Tyxia...). Fork of mgcrea/homebridge-tydom: https://github.com/maximekduval/homebridge-tydom",
   "author": "maximekduval <maximekduval@gmail.com>",
   "contributors": [
