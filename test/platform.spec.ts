@@ -260,23 +260,68 @@ describe("TydomPlatform", () => {
    * "Failed to finish launching", which reads like a plugin fault and sent
    * people hunting through their config for a mistake that was not there.
    */
-  it("blames the gateway, not the credentials, when a scan fails after connecting", async () => {
-    const context = deviceContext({ accessoryId: "a" });
-    const { platform, calls, log } = createPlatform([context]);
-    await platform.didFinishLaunching();
+  it("retries a scan that fails after connecting, on the same connection", async () => {
+    vi.useFakeTimers();
+    try {
+      const context = deviceContext({ accessoryId: "a" });
+      const { platform, calls, log } = createPlatform([context]);
+      const controller = platform.controller!;
+      const state = controller as unknown as { hasConnectedOnce: boolean; connected: boolean };
+      let connects = 0;
+      controller.connect = async () => {
+        connects += 1;
+        state.hasConnectedOnce = true;
+        state.connected = true;
+      };
+      const scan = controller.scan.bind(controller);
+      let failures = 1;
+      controller.scan = async () => {
+        if (failures-- > 0) {
+          throw new Error("Socket closed while request was pending");
+        }
+        return scan();
+      };
 
-    platform.controller!.scan = async () => {
-      throw new Error("Socket closed while request was pending");
-    };
-    await platform.didFinishLaunching();
+      const launching = platform.didFinishLaunching();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await launching;
 
-    const messages = log.messages.join("\n");
-    expect(messages).toMatch(/login was accepted/i);
-    expect(messages).toMatch(/Socket closed while request was pending/);
-    expect(messages).not.toMatch(/Failed to finish launching/);
-    // The accessories outlive a failed scan.
-    expect(platform.accessories.has("uuid:a")).toBe(true);
-    expect(calls.filter((call) => call.op === "unregister")).toEqual([]);
+      const messages = log.messages.join("\n");
+      expect(messages).toMatch(/Reading the device list attempt 1 failed/);
+      expect(messages).toMatch(/Socket closed while request was pending/);
+      expect(messages).not.toMatch(/Failed to finish launching/);
+      // The controller reconnects by itself once connected: no second socket.
+      expect(connects).toBe(1);
+      expect(platform.accessories.has("uuid:a")).toBe(true);
+      expect(calls.filter((call) => call.op === "unregister")).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps trying to connect instead of giving up after ten attempts", async () => {
+    vi.useFakeTimers();
+    try {
+      const context = deviceContext({ accessoryId: "a" });
+      const { platform } = createPlatform([context]);
+      const controller = platform.controller!;
+      let attempts = 0;
+      controller.connect = async () => {
+        attempts += 1;
+        if (attempts <= 15) {
+          throw new Error("getaddrinfo ENOTFOUND mediation.tydom.com");
+        }
+      };
+
+      const launching = platform.didFinishLaunching();
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1000);
+      await launching;
+
+      expect(attempts).toBe(16);
+      expect(platform.accessories.has("uuid:a")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("forgets a companion link when the primary is swept", async () => {

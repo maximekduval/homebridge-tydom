@@ -1,6 +1,12 @@
 import type { Logging } from "homebridge";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import TydomController from "../src/controller.js";
+import { EventEmitter } from "node:events";
+import TydomController, {
+  CONNECT_TIMEOUT_MS,
+  RECONNECT_MAX_DELAY_MS,
+  reconnectDelay,
+  type TydomClientFactory,
+} from "../src/controller.js";
 import type { TydomPlatformConfig } from "../src/platform.js";
 import type { TydomAccessoryContext } from "../src/typings/tydom.js";
 
@@ -12,7 +18,7 @@ import type { TydomAccessoryContext } from "../src/typings/tydom.js";
  * driven by hand, which is what lets the reconnection paths — the ones with no
  * coverage at all until now — be exercised deterministically.
  */
-const createController = () => {
+const createController = (clientFactory?: TydomClientFactory) => {
   const messages: string[] = [];
   const log = ((message: string) => messages.push(message)) as unknown as Logging;
   log.info = (message: string) => messages.push(`info: ${message}`);
@@ -38,6 +44,9 @@ const createController = () => {
     debug: false,
   } as unknown as TydomPlatformConfig;
 
+  if (clientFactory) {
+    return { controller: new TydomController(log, config, clientFactory), messages, calls: [] };
+  }
   const controller = new TydomController(log, config);
   const calls: string[] = [];
   const client = controller.client as unknown as Record<string, unknown>;
@@ -262,3 +271,142 @@ async function reachFirstConnectionFor(controller: TydomController): Promise<voi
   await vi.advanceTimersByTimeAsync(300);
   await connecting;
 }
+
+/**
+ * A `tydom-client` stand-in whose `connect` is decided by the test, and which
+ * emits `connect` on success as the real one does.
+ */
+class FakeClient extends EventEmitter {
+  closed = false;
+  constructor(private readonly behaviour: () => "ok" | "fail" | "hang") {
+    super();
+  }
+
+  async connect(): Promise<void> {
+    const outcome = this.behaviour();
+    if (outcome === "hang") {
+      return new Promise<void>(() => undefined);
+    }
+    if (outcome === "fail") {
+      throw new Error("connect ECONNREFUSED");
+    }
+    this.emit("connect");
+  }
+
+  async get(): Promise<unknown> {
+    return {};
+  }
+
+  async post(): Promise<unknown> {
+    return {};
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+}
+
+const fakeClients = (behaviour: () => "ok" | "fail" | "hang") => {
+  const clients: FakeClient[] = [];
+  const factory = (() => {
+    const client = new FakeClient(behaviour);
+    clients.push(client);
+    return client;
+  }) as unknown as TydomClientFactory;
+  return { clients, factory };
+};
+
+describe("reconnection", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("caps the backoff at a minute", () => {
+    const noJitter = () => 0;
+    expect(reconnectDelay(0, noJitter)).toBe(2_000);
+    expect(reconnectDelay(1, noJitter)).toBe(4_000);
+    expect(reconnectDelay(5, noJitter)).toBe(RECONNECT_MAX_DELAY_MS);
+    expect(reconnectDelay(1_000, noJitter)).toBe(RECONNECT_MAX_DELAY_MS);
+  });
+
+  it("reconnects after a drop, and keeps trying through a long outage", async () => {
+    let outcome: "ok" | "fail" = "ok";
+    let attempts = 0;
+    const { clients, factory } = fakeClients(() => {
+      attempts += 1;
+      return outcome;
+    });
+    const { controller, messages } = createController(factory);
+    await reachFirstConnectionFor(controller);
+    expect(controller.isConnected).toBe(true);
+
+    outcome = "fail";
+    attempts = 0;
+    clients.at(-1)!.emit("disconnect");
+    expect(controller.isConnected).toBe(false);
+
+    // Two hours of outage: tydom-client's own backoff would be waiting for
+    // days by then. Capped at a minute, that is over a hundred attempts.
+    await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1000);
+    expect(attempts).toBeGreaterThan(100);
+    expect(messages.filter((m) => m.includes("still unreachable"))).toHaveLength(1);
+
+    outcome = "ok";
+    await vi.advanceTimersByTimeAsync(RECONNECT_MAX_DELAY_MS + 1_000);
+    expect(controller.isConnected).toBe(true);
+    expect(messages.some((m) => m.includes("reachable again"))).toBe(true);
+    controller.dispose();
+  });
+
+  it("abandons a hung attempt and starts over with a fresh client", async () => {
+    let outcome: "ok" | "hang" = "ok";
+    const { clients, factory } = fakeClients(() => outcome);
+    const { controller } = createController(factory);
+    await reachFirstConnectionFor(controller);
+    const before = clients.length;
+
+    outcome = "hang";
+    clients.at(-1)!.emit("disconnect");
+    await vi.advanceTimersByTimeAsync(5_000 + CONNECT_TIMEOUT_MS);
+    // The hung client was replaced, not reused.
+    expect(clients.length).toBeGreaterThan(before);
+    expect(clients[before - 1]!.closed).toBe(true);
+
+    outcome = "ok";
+    await vi.advanceTimersByTimeAsync(10 * CONNECT_TIMEOUT_MS);
+    expect(controller.isConnected).toBe(true);
+    controller.dispose();
+  });
+
+  it("does not reconnect once disposed", async () => {
+    let attempts = 0;
+    const { clients, factory } = fakeClients(() => {
+      attempts += 1;
+      return "ok";
+    });
+    const { controller } = createController(factory);
+    await reachFirstConnectionFor(controller);
+    attempts = 0;
+
+    controller.dispose();
+    clients.at(-1)!.emit("disconnect");
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+    expect(attempts).toBe(0);
+  });
+
+  it("leaves the first connection to the caller", async () => {
+    let attempts = 0;
+    const { clients, factory } = fakeClients(() => {
+      attempts += 1;
+      return "ok";
+    });
+    const { controller } = createController(factory);
+    clients.at(-1)!.emit("disconnect");
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+    expect(attempts).toBe(0);
+    controller.dispose();
+  });
+});

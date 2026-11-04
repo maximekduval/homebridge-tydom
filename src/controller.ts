@@ -18,7 +18,7 @@ import {
   type TydomUpdateType,
 } from "./api/types.js";
 import type { TydomUpdateType as TydomAccessoryUpdateType } from "./api/types.js";
-import { asyncWait } from "./util/async.js";
+import { asyncWait, withTimeout } from "./util/async.js";
 import type { TydomPlatformConfig } from "./platform.js";
 import type {
   TydomAccessoryContext,
@@ -48,6 +48,32 @@ import {
 } from "tydom-client";
 
 export type ControllerDevicePayload = TydomAccessoryContext;
+
+/** Builds a `tydom-client` instance. Injectable so tests can count clients. */
+export type TydomClientFactory = (options: TydomClientOptions) => TydomClient;
+
+type TydomClientOptions = Parameters<typeof createTydomClient>[0];
+
+/** First wait before reconnecting, doubled after each failed attempt. */
+export const RECONNECT_BASE_DELAY_MS = 2_000;
+/**
+ * Longest wait between two reconnection attempts.
+ *
+ * `tydom-client` caps its own backoff at 2^31 ms, about 25 days, and counts
+ * every attempt twice, so a gateway or a Delta Dore outage of an hour or two
+ * left the plugin waiting for many hours — "No Response" until Homebridge was
+ * restarted. A minute is cheap for the gateway and short enough to be invisible
+ * once the network is back.
+ */
+export const RECONNECT_MAX_DELAY_MS = 60_000;
+/**
+ * Longest a connection attempt may take, login included.
+ *
+ * Neither the login request nor the WebSocket handshake of `tydom-client` has a
+ * timeout, so an attempt that hung (a half-open TCP connection after a network
+ * change, a gateway rebooting mid-handshake) stopped every later reconnection.
+ */
+export const CONNECT_TIMEOUT_MS = 30_000;
 
 export type ControllerUpdatePayload = {
   type: TydomAccessoryUpdateType;
@@ -82,24 +108,29 @@ export default class TydomController extends EventEmitter {
   /**
    * Whether a socket is currently up.
    *
-   * `tydom-client` reconnects on its own (`retryOnClose` defaults to true), so
-   * a connection can appear without anyone here having asked for one. The
-   * platform's startup ladder consults this so the two do not each open a
-   * socket and each drive a scan.
+   * The platform's startup ladder consults this so it does not open a second
+   * socket next to the one the reconnection loop brought back.
    */
   private connected = false;
   /**
    * Set by `dispose`, and never cleared.
    *
-   * `client.close()` cannot actually stop `tydom-client`: its socket `close`
-   * handler calls `scheduleReconnect` unconditionally, and the `isExiting` flag
-   * that would suppress that is only set by its own SIGINT/SIGTERM handler. So
-   * a Homebridge `shutdown` leaves the client reconnecting, and every
-   * reconnection used to re-arm the refresh interval the platform had just
-   * cleared and replay device state into disposed handlers. We cannot stop it
-   * reconnecting from out here; we can stop reacting to it.
+   * The clients are built with `retryOnClose: false`, so closing one no longer
+   * makes it reconnect behind our back; the flag still guards the timers and
+   * the events that may already be on their way.
    */
   private disposed = false;
+  /** The pending reconnection, if one is scheduled. */
+  private reconnectTimer: NodeJS.Timeout | undefined;
+  /** A reconnection attempt is running. */
+  private reconnecting = false;
+  /** Failed attempts since the connection was last re-synced successfully. */
+  private reconnectAttempts = 0;
+  /** When the socket last dropped, for the reconnection message. */
+  private disconnectedAt: number | undefined;
+  /** Logged the "still unreachable" warning for the current outage. */
+  private warnedUnreachable = false;
+  private readonly clientFactory: TydomClientFactory;
   /** The resync in flight, if any; see `resync`. */
   private resyncing: Promise<void> | undefined;
   private pendingResync = false;
@@ -113,8 +144,13 @@ export default class TydomController extends EventEmitter {
   private gatewayPassword: string;
   /** Delta Dore label lookups, bound to the configured locale. */
   private readonly t: Translator;
-  constructor(log: Logging, config: TydomPlatformConfig) {
+  constructor(
+    log: Logging,
+    config: TydomPlatformConfig,
+    clientFactory: TydomClientFactory = createTydomClient,
+  ) {
     super();
+    this.clientFactory = clientFactory;
     this.config = config;
     this.log = log;
     this.t = createTranslator(config.locale);
@@ -139,7 +175,19 @@ export default class TydomController extends EventEmitter {
    */
   private createClient(password: string): TydomClient {
     const { hostname, username } = this.config;
-    const client = createTydomClient({ username, password, hostname, followUpDebounce: 500 });
+    const client = this.clientFactory({
+      username,
+      password,
+      hostname,
+      followUpDebounce: 500,
+      // The controller owns reconnection (see `scheduleReconnect`): the
+      // library's own loop backs off for days and stalls on a hung attempt.
+      retryOnClose: false,
+      // Homebridge's `shutdown` reaches `dispose`, which closes the socket. The
+      // library's SIGINT/SIGTERM listeners would add one pair per client, and a
+      // client is replaced after every attempt that times out.
+      closeOnExit: false,
+    });
     client.on("message", (message: TydomHttpMessage) => {
       try {
         this.handleMessage(message);
@@ -154,32 +202,143 @@ export default class TydomController extends EventEmitter {
         return;
       }
       this.connected = true;
-      this.log.info(
-        `Successfully connected to Tydom hostname=${styleString(hostname)} with username=${styleString(username)}`,
-      );
+      this.clearReconnectTimer();
       if (this.hasConnectedOnce) {
-        this.log.warn(
-          `Reconnected to Tydom hostname=${styleString(hostname)}, re-syncing state...`,
+        // Delta Dore's relay drops the socket every so often, and coming back a
+        // few seconds later is the normal case: one line, not three warnings.
+        const downFor = this.disconnectedAt ? Date.now() - this.disconnectedAt : 0;
+        this.disconnectedAt = undefined;
+        this.log.info(
+          `Reconnected to Tydom hostname=${styleString(hostname)} after ${Math.round(downFor / 1000)}s, re-syncing state`,
         );
         this.resync().catch((err: unknown) => {
           this.log.error(`Failed to re-sync after reconnection: ${stringifyError(err as Error)}`);
         });
+      } else {
+        this.log.info(
+          `Successfully connected to Tydom hostname=${styleString(hostname)} with username=${styleString(username)}`,
+        );
       }
       this.emit("connect");
     });
     client.on("disconnect", () => {
+      const wasConnected = this.connected;
       this.connected = false;
       if (this.disposed) {
         return;
       }
-      this.log.warn(`Disconnected from Tydom hostname=${styleString(hostname)}`);
+      // A failed reconnection attempt closes a socket that never opened, which
+      // is not news. A real drop is logged at debug: most heal within seconds
+      // and the reconnection says so, and one that lasts is reported by
+      // `reconnect`.
+      if (wasConnected) {
+        this.disconnectedAt = Date.now();
+        debug(`Disconnected from Tydom hostname=${styleString(hostname)}, reconnecting...`);
+      }
       if (this.refreshInterval) {
         clearInterval(this.refreshInterval);
         this.refreshInterval = undefined;
       }
       this.emit("disconnect");
+      this.scheduleReconnect();
     });
     return client;
+  }
+
+  /**
+   * Swap the client for a fresh one with the same credentials.
+   *
+   * Used after an attempt that timed out: its login or handshake may still be
+   * pending and could open a socket later, so the old client is detached and
+   * closed as soon as it does, instead of being reused in an unknown state.
+   */
+  private replaceClient(): void {
+    const stale = this.client;
+    stale.removeAllListeners();
+    stale.on("connect", () => {
+      try {
+        stale.close();
+      } catch {
+        // Nothing left to release.
+      }
+    });
+    try {
+      stale.close();
+    } catch {
+      // A client whose socket never opened has nothing to close.
+    }
+    this.client = this.createClient(this.gatewayPassword);
+  }
+
+  /** Open a socket, giving up after `CONNECT_TIMEOUT_MS`. */
+  private async openSocket(): Promise<void> {
+    try {
+      await withTimeout(
+        this.client.connect(),
+        CONNECT_TIMEOUT_MS,
+        `Connecting to ${this.config.hostname} timed out after ${CONNECT_TIMEOUT_MS / 1000}s`,
+      );
+    } catch (err) {
+      this.replaceClient();
+      throw err;
+    }
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
+  }
+
+  /**
+   * Reconnect after the socket dropped, with a capped exponential backoff.
+   *
+   * Only once the first connection succeeded: before that, the platform's
+   * startup ladder is in charge. Never more than one attempt or one timer at a
+   * time, however many `disconnect` events a failing attempt produces.
+   */
+  private scheduleReconnect(): void {
+    if (this.disposed || !this.hasConnectedOnce || this.reconnecting || this.reconnectTimer) {
+      return;
+    }
+    const delay = reconnectDelay(this.reconnectAttempts);
+    this.reconnectAttempts += 1;
+    debug(`Reconnecting to hostname=${styleString(this.config.hostname)} in ${delay}ms`);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      void this.reconnect();
+    }, delay);
+    this.reconnectTimer.unref?.();
+  }
+
+  private async reconnect(): Promise<void> {
+    if (this.disposed || this.connected) {
+      return;
+    }
+    this.reconnecting = true;
+    try {
+      await this.openSocket();
+    } catch (err) {
+      const message = stringifyError(err as Error);
+      if (
+        !this.warnedUnreachable &&
+        reconnectDelay(this.reconnectAttempts) >= RECONNECT_MAX_DELAY_MS
+      ) {
+        this.warnedUnreachable = true;
+        this.log.warn(
+          `Tydom hostname=${styleString(this.config.hostname)} is still unreachable (${message}), ` +
+            `retrying every ${RECONNECT_MAX_DELAY_MS / 1000}s`,
+        );
+      } else {
+        debug(`Reconnection attempt ${this.reconnectAttempts} failed: ${message}`);
+      }
+    } finally {
+      this.reconnecting = false;
+    }
+    if (!this.connected) {
+      this.scheduleReconnect();
+    }
   }
   /**
    * Fetch the gateway password from the Delta Dore account, once.
@@ -215,6 +374,14 @@ export default class TydomController extends EventEmitter {
     return this.connected;
   }
 
+  /**
+   * Whether `connect` has succeeded once. From then on the controller
+   * reconnects by itself, and nobody else should call `connect` again.
+   */
+  get hasConnected(): boolean {
+    return this.hasConnectedOnce;
+  }
+
   async connect(): Promise<void> {
     const { hostname, username } = this.config;
     debug(`Connecting to hostname=${styleString(hostname)}...`);
@@ -224,7 +391,7 @@ export default class TydomController extends EventEmitter {
     // `DeltaDoreAuthError` and stops rather than retrying it.
     await this.resolveGatewayPassword();
     try {
-      await this.client.connect();
+      await this.openSocket();
       await asyncWait(250);
       // Initial intro handshake
       await this.client.get("/ping");
@@ -424,18 +591,23 @@ export default class TydomController extends EventEmitter {
     }
     // Re-establish the refresh interval, which the disconnect handler cleared.
     this.scheduleRefresh();
+    // The gateway answers again: the next outage starts its backoff afresh.
+    this.reconnectAttempts = 0;
+    if (this.warnedUnreachable) {
+      this.warnedUnreachable = false;
+      this.log.info(`Tydom hostname=${styleString(this.config.hostname)} is reachable again`);
+    }
   }
 
   /**
-   * Stop the refresh timer and close the socket. Idempotent.
+   * Stop the timers and close the socket. Idempotent.
    *
-   * Listeners come off before the close: `client.close()` triggers the socket's
-   * own `close` handler, which reconnects. See `disposed` for why that cannot
-   * be prevented from here — detaching first is what stops the reconnection
-   * from re-arming timers and pushing state into handlers that are gone.
+   * Listeners come off before the close, so the `disconnect` it causes does not
+   * schedule a reconnection or push state into handlers that are gone.
    */
   dispose(): void {
     this.disposed = true;
+    this.clearReconnectTimer();
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval);
       this.refreshInterval = undefined;
@@ -486,3 +658,8 @@ export default class TydomController extends EventEmitter {
     }
   }
 }
+
+/** Capped exponential backoff with a little jitter, for `attempt` failures so far. */
+export const reconnectDelay = (attempt: number, random: () => number = Math.random): number =>
+  Math.min(RECONNECT_BASE_DELAY_MS * 2 ** Math.min(attempt, 16), RECONNECT_MAX_DELAY_MS) +
+  Math.round(random() * 500);

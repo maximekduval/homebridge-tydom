@@ -3,7 +3,7 @@
  *
  * The accessory layer is the one part of this plugin that legitimately needs
  * HAP, which is why it went untested for so long: `@homebridge/hap-nodejs` is a
- * transitive dependency of `homebridge` and pnpm does not expose it, and adding
+ * transitive dependency of `homebridge`, not a direct one of ours, and adding
  * it outright would pin the tests to one HAP version to gain very little. What
  * the accessories actually use is a small surface — get-or-add a service, get a
  * characteristic, set props, register `onGet`/`onSet`, push a value — so that is
@@ -75,6 +75,19 @@ const makeStatics = (kind: string) => {
 };
 
 export type HapClass = { name: string };
+
+/** HAP's status codes, the one the accessories use seeded with its real value. */
+export const HAPStatus = { SERVICE_COMMUNICATION_FAILURE: -70402 } as const;
+
+/** Stands in for HAP's `HapStatusError`: an error carrying a status code. */
+export class HapStatusError extends Error {
+  constructor(readonly hapStatus: number) {
+    super(`HAP status ${hapStatus}`);
+  }
+}
+
+/** The `api.hap` slice the accessories read. */
+export const fakeHapApi = { hap: { HapStatusError, HAPStatus } };
 
 export class FakeCharacteristic {
   value: unknown;

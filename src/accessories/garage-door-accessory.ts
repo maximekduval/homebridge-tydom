@@ -67,37 +67,43 @@ export class GarageDoorAccessory extends BaseAccessory {
     }
     this.#service = this.service(this.platform.Service.GarageDoorOpener);
 
-    this.#service.getCharacteristic(CurrentDoorState).onGet(async () => {
-      debugGet(CurrentDoorState, this.#service);
-      if (this.#toggleOnly) {
-        debugGetResult(CurrentDoorState, this.#service, this.#currentDoorState);
-        return this.#currentDoorState;
-      }
-      const next = await this.#readDoorState();
-      this.#applyKnownState(next);
-      debugGetResult(CurrentDoorState, this.#service, next);
-      return next;
-    });
+    this.#service.getCharacteristic(CurrentDoorState).onGet(
+      this.guardRead(async () => {
+        debugGet(CurrentDoorState, this.#service);
+        if (this.#toggleOnly) {
+          debugGetResult(CurrentDoorState, this.#service, this.#currentDoorState);
+          return this.#currentDoorState;
+        }
+        const next = await this.#readDoorState();
+        this.#applyKnownState(next);
+        debugGetResult(CurrentDoorState, this.#service, next);
+        return next;
+      }),
+    );
 
     this.#service
       .getCharacteristic(TargetDoorState)
-      .onGet(async () => {
-        debugGet(TargetDoorState, this.#service);
-        if (this.#toggleOnly) {
-          debugGetResult(TargetDoorState, this.#service, this.#targetDoorState);
-          return this.#targetDoorState;
-        }
-        const next = await this.#readDoorState();
-        this.#lastUpdatedAt = Date.now();
-        this.#computedPosition = next === TargetDoorState.OPEN ? 100 : 0;
-        debugGetResult(TargetDoorState, this.#service, next);
-        return next;
-      })
-      .onSet(async (value) => {
-        debugSet(TargetDoorState, this.#service, value);
-        await this.#requestDoorState(asNumber(value));
-        debugSetResult(TargetDoorState, this.#service, value);
-      });
+      .onGet(
+        this.guardRead(async () => {
+          debugGet(TargetDoorState, this.#service);
+          if (this.#toggleOnly) {
+            debugGetResult(TargetDoorState, this.#service, this.#targetDoorState);
+            return this.#targetDoorState;
+          }
+          const next = await this.#readDoorState();
+          this.#lastUpdatedAt = Date.now();
+          this.#computedPosition = next === TargetDoorState.OPEN ? 100 : 0;
+          debugGetResult(TargetDoorState, this.#service, next);
+          return next;
+        }),
+      )
+      .onSet(
+        this.guardWrite(async (value) => {
+          debugSet(TargetDoorState, this.#service, value);
+          await this.#requestDoorState(asNumber(value));
+          debugSetResult(TargetDoorState, this.#service, value);
+        }),
+      );
   }
 
   protected override apply(updates: Record<string, unknown>[], type: TydomUpdateType): void {

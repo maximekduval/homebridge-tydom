@@ -63,13 +63,15 @@ export class SecuritySystemSensorsAccessory extends BaseAccessory {
       service
         .getCharacteristic(ContactSensorState)
         .setValue(openIssues.has(productId) ? 1 : 0)
-        .onGet(async () => {
-          debugGet(ContactSensorState, service);
-          const issues = await this.#readOpenIssues();
-          const nextValue = issues.has(productId) ? 1 : 0;
-          debugGetResult(ContactSensorState, service, nextValue);
-          return nextValue;
-        });
+        .onGet(
+          this.guardRead(async () => {
+            debugGet(ContactSensorState, service);
+            const issues = await this.#readOpenIssues();
+            const nextValue = issues.has(productId) ? 1 : 0;
+            debugGetResult(ContactSensorState, service, nextValue);
+            return nextValue;
+          }),
+        );
       service.getCharacteristic(Characteristic.StatusActive).setValue(1);
       service.getCharacteristic(Characteristic.StatusFault).setValue(0);
     }

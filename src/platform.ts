@@ -8,6 +8,7 @@ import type {
 import type { Service, Characteristic } from "homebridge";
 import type { Categories } from "homebridge";
 import { TydomApiClient, type PluginLogger, type TydomTransport } from "./api/client.js";
+import { GatewayDisconnectedError } from "./api/errors.js";
 import { CATEGORY, deviceTypeForCategory, type DeviceType } from "./api/device-type.js";
 import { ConfigError, parseConfig, type TydomConfig } from "./config.js";
 import { PLATFORM_NAME, PLUGIN_NAME } from "./config/env.js";
@@ -122,6 +123,12 @@ export default class TydomPlatform implements DynamicPlatformPlugin {
 
     this.controller = new TydomController(log, this.config);
     const controller = this.controller;
+    const connectedClient = () => {
+      if (!controller.isConnected) {
+        throw new GatewayDisconnectedError();
+      }
+      return controller.client;
+    };
     this.apiClient = new TydomApiClient({
       // Resolved per call rather than captured: with account credentials the
       // controller replaces its client once `connect` has fetched the gateway
@@ -130,11 +137,15 @@ export default class TydomPlatform implements DynamicPlatformPlugin {
       //
       // tydom-client's methods are generic over the response type; the
       // transport seam deliberately is not, so it can be faked in tests.
+      //
+      // While the socket is down a request fails here, before reaching the
+      // client, with an error the accessories recognise as "reconnecting" and
+      // answer HomeKit with the last known state or "No Response".
       transport: {
-        get: (uri) => controller.client.get(uri),
-        put: (uri, body) => controller.client.put(uri, body as never),
-        post: (uri, body) => controller.client.post(uri, body as never),
-        command: (uri) => controller.client.command(uri),
+        get: async (uri) => connectedClient().get(uri),
+        put: async (uri, body) => connectedClient().put(uri, body as never),
+        post: async (uri, body) => connectedClient().post(uri, body as never),
+        command: async (uri) => connectedClient().command(uri),
       } satisfies TydomTransport,
       logger: this.pluginLog,
     });
@@ -184,21 +195,16 @@ export default class TydomPlatform implements DynamicPlatformPlugin {
     this.cleanupAccessoriesIds = new Set(this.accessories.keys());
     this.discoveredDevices = 0;
 
-    const maxRetries = 10;
+    // Never gives up: a Homebridge that boots before the network, or during a
+    // Delta Dore outage, used to stop after ten attempts (about half an hour)
+    // and stay without accessories until it was restarted by hand.
     const maxDelay = 5 * 60 * 1000; // 5 minutes
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    for (let attempt = 0; ; attempt++) {
       if (this.shuttingDown) {
         return;
       }
-      // `tydom-client` reconnects on its own, so a socket may already have come
-      // up while this ladder was waiting out its backoff. Asking for another
-      // one opens a second socket and drives a second scan.
-      if (attempt > 0 && this.controller.isConnected) {
-        this.log.info("A connection came up while retrying; continuing with it.");
-        break;
-      }
       try {
-        await this.controller.connect();
+        await this.connectAndScan();
         break;
       } catch (err) {
         if (err instanceof DeltaDoreAuthError) {
@@ -208,15 +214,10 @@ export default class TydomPlatform implements DynamicPlatformPlugin {
           this.log.error(err.message);
           return;
         }
-        if (attempt === maxRetries) {
-          this.log.error(
-            `Failed to connect after ${maxRetries} retries, giving up: ${stringifyError(err as Error)}`,
-          );
-          return;
-        }
         const delay = Math.min(5000 * Math.pow(2, attempt), maxDelay);
         this.log.warn(
-          `Connection attempt ${attempt + 1} failed, retrying in ${Math.round(delay / 1000)}s...`,
+          `${this.controller.hasConnected ? "Reading the device list" : "Connection"} attempt ` +
+            `${attempt + 1} failed (${stringifyError(err as Error)}), retrying in ${Math.round(delay / 1000)}s...`,
         );
         await new Promise<void>((resolve) => {
           const timer = setTimeout(resolve, delay);
@@ -225,23 +226,6 @@ export default class TydomPlatform implements DynamicPlatformPlugin {
       }
     }
 
-    try {
-      await this.controller.scan();
-    } catch (err) {
-      // Reaching here means the socket came up and the login was accepted, so
-      // the credentials are not the problem however much the raw error looks
-      // like it. Saying that outright saves people searching their config for a
-      // fault that is at the other end of the wire. `tydom-client` keeps
-      // reconnecting underneath, and `resync` picks the scan back up.
-      this.log.error(
-        `Connected to ${this.config.hostname} but could not read the device list: ` +
-          `${stringifyError(err as Error)}. The login was accepted, so this is the ` +
-          `gateway not answering rather than a credentials problem — check it responds ` +
-          `in the Tydom app. The existing accessories are kept, and the plugin retries ` +
-          `when the connection comes back.`,
-      );
-      return;
-    }
     await this.settlePendingDevices();
     // A scan that found nothing is not evidence that nothing is there. An
     // empty `/configs/file` parses into a perfectly valid zero-device scan, and
@@ -268,6 +252,23 @@ export default class TydomPlatform implements DynamicPlatformPlugin {
       this.forgetAccessory(accessoryId);
     });
     this.log.info(`Properly loaded ${this.accessories.size}-accessories`);
+  }
+
+  /**
+   * Open the first connection if there is none yet, then read the device list.
+   *
+   * Once a connection has been made the controller reconnects by itself, so a
+   * scan that failed (the gateway accepted the login but did not answer) waits
+   * for that rather than opening a second socket next to it.
+   */
+  async connectAndScan(): Promise<void> {
+    assert(this.controller);
+    if (!this.controller.hasConnected) {
+      await this.controller.connect();
+    } else if (!this.controller.isConnected) {
+      throw new GatewayDisconnectedError();
+    }
+    await this.controller.scan();
   }
 
   /**

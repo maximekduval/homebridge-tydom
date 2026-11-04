@@ -100,33 +100,41 @@ export class SecuritySystemAccessory extends BaseAccessory {
       .getCharacteristic(SecuritySystemCurrentState)
       // Default to disarmed so a restart cannot look like a triggered alarm.
       .updateValue(SecuritySystemCurrentState.DISARMED)
-      .onGet(async () => {
-        debugGet(SecuritySystemCurrentState, service);
-        const nextValue = await this.#currentState();
-        debugGetResult(SecuritySystemCurrentState, service, nextValue);
-        return nextValue;
-      });
+      .onGet(
+        this.guardRead(async () => {
+          debugGet(SecuritySystemCurrentState, service);
+          const nextValue = await this.#currentState();
+          debugGetResult(SecuritySystemCurrentState, service, nextValue);
+          return nextValue;
+        }),
+      );
 
-    service.getCharacteristic(StatusTampered).onGet(async () => {
-      debugGet(StatusTampered, service);
-      const data = await this.#read();
-      const value = getTydomDataPropValue<boolean>(data, "systAutoProtect");
-      debugGetResult(StatusTampered, service, value);
-      return value;
-    });
+    service.getCharacteristic(StatusTampered).onGet(
+      this.guardRead(async () => {
+        debugGet(StatusTampered, service);
+        const data = await this.#read();
+        const value = getTydomDataPropValue<boolean>(data, "systAutoProtect");
+        debugGetResult(StatusTampered, service, value);
+        return value;
+      }),
+    );
 
     service
       .getCharacteristic(SecuritySystemTargetState)
-      .onGet(async () => {
-        debugGet(SecuritySystemTargetState, service);
-        const nextValue = await this.#targetState();
-        debugGetResult(SecuritySystemTargetState, service, nextValue);
-        return nextValue;
-      })
-      .onSet(async (value) => {
-        debugSet(SecuritySystemTargetState, service, value);
-        await this.#arm(value as number);
-      });
+      .onGet(
+        this.guardRead(async () => {
+          debugGet(SecuritySystemTargetState, service);
+          const nextValue = await this.#targetState();
+          debugGetResult(SecuritySystemTargetState, service, nextValue);
+          return nextValue;
+        }),
+      )
+      .onSet(
+        this.guardWrite(async (value) => {
+          debugSet(SecuritySystemTargetState, service, value);
+          await this.#arm(value as number);
+        }),
+      );
 
     this.#systOpenIssue = this.#addContactSensor(
       "systOpenIssue",
@@ -178,27 +186,29 @@ export class SecuritySystemAccessory extends BaseAccessory {
     this.#service?.addLinkedService(service);
     service
       .getCharacteristic(On)
-      .onSet(async (value) => {
-        debugSet(On, service, value);
-        if (!value) {
-          return;
-        }
-        // Deferred: HAP stores the written value once this handler returns, so
-        // resetting it from in here would be overwritten straight away.
-        this.clearTimer(this.#panicResetTimer);
-        this.#panicResetTimer = this.setTimer(() => {
-          this.#panicResetTimer = undefined;
-          service.updateCharacteristic(On, false);
-        }, PANIC_PULSE_MS);
-        if (!this.#pin) {
-          return;
-        }
-        await this.api.putCommand(this.deviceId, this.endpointId, "alarmCmd", {
-          value: "PANIC",
-          pwd: this.#pin,
-        });
-        debugSetResult(On, service, value, "PANIC");
-      })
+      .onSet(
+        this.guardWrite(async (value) => {
+          debugSet(On, service, value);
+          if (!value) {
+            return;
+          }
+          // Deferred: HAP stores the written value once this handler returns, so
+          // resetting it from in here would be overwritten straight away.
+          this.clearTimer(this.#panicResetTimer);
+          this.#panicResetTimer = this.setTimer(() => {
+            this.#panicResetTimer = undefined;
+            service.updateCharacteristic(On, false);
+          }, PANIC_PULSE_MS);
+          if (!this.#pin) {
+            return;
+          }
+          await this.api.putCommand(this.deviceId, this.endpointId, "alarmCmd", {
+            value: "PANIC",
+            pwd: this.#pin,
+          });
+          debugSetResult(On, service, value, "PANIC");
+        }),
+      )
       .updateValue(false);
   }
 
@@ -294,12 +304,14 @@ export class SecuritySystemAccessory extends BaseAccessory {
     debugAddSubService(service, this.accessory);
     this.#service?.addLinkedService(service);
     if (read) {
-      service.getCharacteristic(Characteristic.ContactSensorState).onGet(async () => {
-        debugGet(Characteristic.ContactSensorState, service);
-        const value = await read();
-        debugGetResult(Characteristic.ContactSensorState, service, value);
-        return value;
-      });
+      service.getCharacteristic(Characteristic.ContactSensorState).onGet(
+        this.guardRead(async () => {
+          debugGet(Characteristic.ContactSensorState, service);
+          const value = await read();
+          debugGetResult(Characteristic.ContactSensorState, service, value);
+          return value;
+        }),
+      );
     }
     service.getCharacteristic(Characteristic.StatusActive).updateValue(true);
     service.getCharacteristic(Characteristic.StatusFault).updateValue(false);
@@ -342,23 +354,27 @@ export class SecuritySystemAccessory extends BaseAccessory {
 
       service
         .getCharacteristic(On)
-        .onGet(async () => {
-          debugGet(On, service);
-          // Reads the panel's mode, not just this zone's property: see
-          // `isZoneArmed`.
-          const nextValue = isZoneArmed(await this.#read(), zoneProp);
-          debugGetResult(On, service, nextValue);
-          return nextValue;
-        })
-        .onSet(async (value) => {
-          debugSet(On, service, value);
-          if (!this.#pin) {
-            return;
-          }
-          const tydomValue = value ? this.#armValue(this.#zoneCommand) : "OFF";
-          await this.#setZones([zoneIndex], tydomValue);
-          debugSetResult(On, service, value, tydomValue);
-        });
+        .onGet(
+          this.guardRead(async () => {
+            debugGet(On, service);
+            // Reads the panel's mode, not just this zone's property: see
+            // `isZoneArmed`.
+            const nextValue = isZoneArmed(await this.#read(), zoneProp);
+            debugGetResult(On, service, nextValue);
+            return nextValue;
+          }),
+        )
+        .onSet(
+          this.guardWrite(async (value) => {
+            debugSet(On, service, value);
+            if (!this.#pin) {
+              return;
+            }
+            const tydomValue = value ? this.#armValue(this.#zoneCommand) : "OFF";
+            await this.#setZones([zoneIndex], tydomValue);
+            debugSetResult(On, service, value, tydomValue);
+          }),
+        );
     }
   }
 
