@@ -1,15 +1,20 @@
 {
-  "name": "homebridge-tydom",
-  "displayName": "Tydom",
-  "version": "0.34.1",
-  "description": "Homebridge plugin to manage Tydom devices by Delta Dore",
-  "author": "Olivier Louvignes <olivier@mgcrea.io>",
+  "name": "homebridge-tydom-mk",
+  "displayName": "Homebridge Tydom MK",
+  "version": "1.0.0",
+  "description": "Homebridge plugin for Tydom devices by Delta Dore (Tyxal, Tyxia...). Fork of mgcrea/homebridge-tydom: https://github.com/maximekduval/homebridge-tydom",
+  "author": "maximekduval <maximekduval@gmail.com>",
+  "contributors": [
+    "Olivier Louvignes <olivier@mgcrea.io>"
+  ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mgcrea/homebridge-tydom.git"
+    "url": "git+https://github.com/maximekduval/homebridge-tydom.git"
   },
-  "homepage": "https://github.com/mgcrea/homebridge-tydom#readme",
-  "bugs": "https://github.com/mgcrea/homebridge-tydom/issues",
+  "homepage": "https://github.com/maximekduval/homebridge-tydom#readme",
+  "bugs": {
+    "url": "https://github.com/maximekduval/homebridge-tydom/issues"
+  },
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.mjs",
@@ -40,6 +45,9 @@
     "node": "^22 || ^24 || ^26",
     "homebridge": "^2.0.0"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
@@ -58,9 +66,8 @@
     "dev:homebridge": "homebridge -D -U ./.homebridge -P . --strict-plugin-resolution",
     "dev:homebridge:insecure": "NODE_TLS_REJECT_UNAUTHORIZED=0 homebridge -D -U ./.homebridge -P . --strict-plugin-resolution",
     "clean": "rm -rf .homebridge/persist/* .homebridge/accessories/*",
-    "test": "pnpm run lint && pnpm run check && pnpm run spec && pnpm run format:check",
-    "release": "release-it",
-    "prepublishOnly": "pnpm run test && pnpm run build"
+    "test": "npm run lint && npm run check && npm run spec && npm run format:check",
+    "prepack": "npm test && npm run build"
   },
   "dependencies": {
     "debug": "^4.4.3",
@@ -77,11 +84,12 @@
     "homebridge": "^2.4.0",
     "oxfmt": "^0.65.0",
     "oxlint": "^1.80.0",
-    "release-it": "^21.0.2",
     "tsdown": "^0.22.14",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11"
   },
-  "packageManager": "pnpm@11.25.0"
+  "allowScripts": {
+    "esbuild": true
+  }
 }

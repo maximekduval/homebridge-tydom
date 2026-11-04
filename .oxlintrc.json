@@ -22,9 +22,12 @@
   },
   "overrides": [
     {
-      "files": ["test/**/*.ts", "scripts/**/*.ts"],
+      "files": ["test/**/*.ts", "scripts/**/*.ts", "scripts/**/*.mjs"],
       "rules": {
-        "no-console": "off"
+        "no-console": "off",
+        // Helpers scoped to the describe block that uses them read better than
+        // a file full of top-level fixtures.
+        "unicorn/consistent-function-scoping": "off"
       }
     }
   ],

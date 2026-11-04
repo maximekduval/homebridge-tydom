@@ -98,7 +98,7 @@ type Match = {
  * `<first_usage>:<sha256 of the metadata signature>`.
  *
  * Each entry is annotated with the GitHub reporter and the hardware model it
- * came from. Add to it with `pnpm hash` against a user's device dump.
+ * came from. Add to it with `npm run hash` against a user's device dump.
  */
 const SIGNATURE_MATCHES: Record<string, Match> = {
   "alarm:0c6e1d33808fa50a0a921502f80d36430dfaeda5abfed2467f9f2b07821e4842": {

@@ -5,8 +5,8 @@
  * The same lookup the plugin performs at startup, runnable on its own so a
  * misconfiguration can be diagnosed without waiting on Homebridge:
  *
- *   pnpm resolve-credentials <email> <password> <mac>
- *   pnpm resolve-credentials --email … --password … --mac 001A25123456
+ *   npm run resolve-credentials -- <email> <password> <mac>
+ *   npm run resolve-credentials -- --email … --password … --mac 001A25123456
  *
  * Note that the MAC is required: Delta Dore's site API validates a gateway you
  * name, it does not enumerate the gateways an account owns.
