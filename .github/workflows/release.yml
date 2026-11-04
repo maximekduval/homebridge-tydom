@@ -1,94 +1,104 @@
-name: release
+name: Release
 
-# Versioning, tagging and the GitHub release are done locally by release-it
-# (`pnpm release`). This workflow only publishes the tag to npm.
+# Stages the package on npm when a version tag such as v1.0.1 is pushed. The
+# staged version is not public until a maintainer approves it with 2FA, on
+# npmjs.com (package > Staged Packages) or with `npm stage approve`.
 #
-# Tags in this repo are `v`-prefixed semver (`v0.29.0`). The unprefixed form is
-# accepted too so a hand-cut tag still publishes.
+# Authentication uses npm trusted publishing (OIDC), so no npm token is stored
+# in GitHub. The trusted publisher is configured on npmjs.com, in the package
+# settings, for this repository and this workflow file name (release.yml) with
+# the stage-only permission: `npm publish` is refused and `npm stage publish`
+# is the only accepted command.
+
 on:
   push:
-    tags:
-      - "v[0-9]+.[0-9]+.[0-9]+*"
-      - "[0-9]+.[0-9]+.[0-9]+*"
+    tags: ['v*.*.*']
 
-# Trusted publishing: npm verifies this workflow's OIDC identity, so there is no
-# NPM_TOKEN to store or rotate. Do not set NODE_AUTH_TOKEN — it takes precedence
-# over OIDC and would silently fall back to token auth.
 permissions:
   contents: read
-  id-token: write
 
-# Never cancel a publish in flight, and never run two at once: npm rejects the
-# loser of a race on the same version, which reads as a failed release.
+# Never cancel a publish in flight, and never run two at once.
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
   publish:
+    name: Publish to npm
     runs-on: ubuntu-latest
-
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v7
+      - name: Check out
+        uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
 
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-          registry-url: https://registry.npmjs.org
-
-      # Trusted publishing needs npm 11.5.1+, which is newer than the version
-      # bundled with some runner images. Held to the same major so a future npm
-      # release cannot change publish behaviour without an edit here.
-      - name: Update npm
-        run: npm install -g npm@^11
-
-      - run: pnpm install --frozen-lockfile
-
-      # A tag that disagrees with package.json would publish the wrong version
-      # under the right name, which is not something npm lets you take back.
-      - name: Verify tag matches package.json
+      - name: Check the tag matches package.json and is on main
         run: |
-          tag="${GITHUB_REF_NAME#v}"
-          pkg="$(node -p "require('./package.json').version")"
-          if [ "$tag" != "$pkg" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $pkg"
+          version="$(node -p "require('./package.json').version")"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package.json version ${version}." >&2
             exit 1
           fi
-          echo "Publishing version $pkg"
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "Tag ${GITHUB_REF_NAME} is not on main." >&2
+            exit 1
+          fi
 
-      - run: pnpm run lint
-      - run: pnpm run check
-      - run: pnpm run format:check
-      - run: pnpm run spec
-      - run: pnpm run build
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      # npm stage publish needs npm 11.15.0 or later, which Node 24 may not bundle.
+      - name: Update npm
+        run: npm install -g npm@^11.15.0
+
+      # The first version is published by hand, before the trusted publisher
+      # can be configured (see RELEASING.md); its tag must not fail the run.
+      - name: Skip a version that is already on npm
+        id: published
+        run: |
+          spec="$(node -p "require('./package.json').name + '@' + require('./package.json').version")"
+          if npm view "${spec}" version > /dev/null 2>&1; then
+            echo "${spec} is already on npm, nothing to stage." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.published.outputs.skip != 'true'
+        run: npm ci
 
       # What actually ships. `files` is narrow enough that a build that emitted
       # nothing would otherwise publish an empty package without complaint.
       - name: Inspect the tarball
+        if: steps.published.outputs.skip != 'true'
         run: npm pack --dry-run
 
-      # --provenance links the published tarball to this workflow run.
-      #
-      # --ignore-scripts skips `prepublishOnly`, which is the local safety net
-      # for a hand-run `npm publish`; the steps above are that same suite, and
-      # without this it runs twice per release.
-      #
-      # The dist-tag is derived from the version rather than left to default:
-      # `npm publish` tags whatever it is given as `latest`, so a prerelease
-      # would have been handed to every installed user on their next upgrade.
-      # A prerelease publishes under its own identifier — 0.30.0-beta.0 goes
-      # out as `beta`, and only someone who asks for it gets it.
-      - name: Publish to npm
+      # prepack runs the lint, the type check, the tests and the build before
+      # packing.
+      - name: Stage the package on npm
+        if: steps.published.outputs.skip != 'true'
+        run: npm stage publish
+
+      - name: Explain how to approve
+        if: steps.published.outputs.skip != 'true'
         run: |
-          pkg="$(node -p "require('./package.json').version")"
-          case "$pkg" in
-            *-*) dist_tag="$(printf '%s' "${pkg#*-}" | cut -d. -f1)" ;;
-            *)   dist_tag=latest ;;
-          esac
-          echo "Publishing $pkg under dist-tag $dist_tag"
-          npm publish --provenance --ignore-scripts --tag "$dist_tag"
+          name="$(node -p "require('./package.json').name")"
+          {
+            echo "### ${GITHUB_REF_NAME} is staged on npm"
+            echo
+            echo "It is not public yet. Approve it with 2FA on npmjs.com (package > Staged Packages),"
+            echo "or with the stage id printed by the \"Stage the package on npm\" step:"
+            echo
+            echo '```'
+            echo "npm stage list ${name}"
+            echo "npm stage approve <stage-id>"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

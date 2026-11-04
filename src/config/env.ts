@@ -1,4 +1,4 @@
-export const PLUGIN_NAME = "homebridge-tydom";
+export const PLUGIN_NAME = "homebridge-tydom-mk";
 export const PLATFORM_NAME = "Tydom";
 /**
  * The plugin and platform names.

@@ -1,5 +1,6 @@
 import type { PlatformAccessory, Service } from "homebridge";
 import type { TydomApiClient } from "../api/client.js";
+import { isConnectivityError } from "../api/errors.js";
 import type { TydomDataElement, TydomEndpointData, TydomUpdateType } from "../api/types.js";
 import { StateCache } from "../util/state-cache.js";
 import type { ServiceClass } from "./service-class.js";
@@ -98,7 +99,70 @@ export abstract class BaseAccessory implements TydomAccessory {
    * background. See `StateCache` for why that is the right trade here.
    */
   protected async read<T extends TydomEndpointData = TydomEndpointData>(): Promise<T> {
-    return (await this.#state.read()) as T;
+    try {
+      return (await this.#state.read()) as T;
+    } catch (err) {
+      // The last thing the gateway told us beats "No Response": it is what the
+      // device was doing a moment ago, and the resync after the reconnection
+      // pushes whatever changed in between.
+      const cached = this.#state.peek();
+      if (cached) {
+        debug(`Serving the last known state of ${this.name}: ${errorMessage(err)}`);
+        return cached as T;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Wrap an `onGet` handler so a failure reaches HomeKit as "No Response".
+   *
+   * Homebridge logs any other error thrown from a handler as "This plugin threw
+   * an error from the characteristic ...", once per characteristic and per
+   * read — a dozen lines each time the Home app opened while the socket to the
+   * gateway was down. A `HapStatusError` is the documented way to say the
+   * device cannot be reached, and Homebridge does not log it.
+   */
+  protected guardRead<A extends unknown[], R>(
+    handler: (...args: A) => R | Promise<R>,
+  ): (...args: A) => Promise<R> {
+    return async (...args: A) => {
+      try {
+        return await handler(...args);
+      } catch (err) {
+        throw this.#toHapError(err, "read");
+      }
+    };
+  }
+
+  /** As `guardRead`, for an `onSet` handler. A failed write is always logged. */
+  protected guardWrite<A extends unknown[], R>(
+    handler: (...args: A) => R | Promise<R>,
+  ): (...args: A) => Promise<R> {
+    return async (...args: A) => {
+      try {
+        return await handler(...args);
+      } catch (err) {
+        throw this.#toHapError(err, "write");
+      }
+    };
+  }
+
+  #toHapError(err: unknown, action: "read" | "write"): Error {
+    const { HapStatusError, HAPStatus } = this.platform.api.hap;
+    if (err instanceof HapStatusError) {
+      return err;
+    }
+    const message = `Could not ${action} ${this.name}: ${errorMessage(err)}`;
+    if (action === "write") {
+      this.platform.log.warn(message);
+    } else if (isConnectivityError(err)) {
+      // Expected while reconnecting, and the controller already said so.
+      debug(message);
+    } else {
+      this.platform.log.warn(message);
+    }
+    return new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   }
 
   /**
@@ -231,3 +295,5 @@ export abstract class BaseAccessory implements TydomAccessory {
     this.accessory.on("identify", this.#identifyListener);
   }
 }
+
+const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));

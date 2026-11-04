@@ -10,7 +10,7 @@ import {
   switchSpec,
   temperatureSensorSpec,
 } from "../src/accessories/specs.js";
-import { createHapStatics, FakeAccessory, type FakeService } from "./hap-double.js";
+import { createHapStatics, fakeHapApi, FakeAccessory, type FakeService } from "./hap-double.js";
 
 type TydomProp = { name: string; value: unknown };
 
@@ -37,6 +37,7 @@ const mount = (
     platform: {
       Service: hap.Service,
       Characteristic: hap.Characteristic,
+      api: fakeHapApi,
       config: { staleAfterMs: 0 },
       log: { warn: () => {}, error: () => {}, info: () => {}, debug: () => {} },
     },

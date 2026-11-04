@@ -56,37 +56,45 @@ export class LightbulbAccessory extends BaseAccessory {
 
     this.#service
       .getCharacteristic(On)
-      .onGet(async () => {
-        debugGet(On, this.#service);
-        const data = await this.read();
-        const level = getTydomDataPropValue<number>(data, "level");
-        const nextValue = level > 0;
-        debugGetResult(On, this.#service, nextValue);
-        return nextValue;
-      })
-      .onSet((value) => {
-        debugSet(On, this.#service, value);
-        const nextLevel = value ? this.#latestBrightness || 100 : 0;
-        this.#writer.submit(nextLevel);
-        this.#service.updateCharacteristic(Brightness, nextLevel);
-        debugSetResult(On, this.#service, value);
-      });
+      .onGet(
+        this.guardRead(async () => {
+          debugGet(On, this.#service);
+          const data = await this.read();
+          const level = getTydomDataPropValue<number>(data, "level");
+          const nextValue = level > 0;
+          debugGetResult(On, this.#service, nextValue);
+          return nextValue;
+        }),
+      )
+      .onSet(
+        this.guardWrite((value) => {
+          debugSet(On, this.#service, value);
+          const nextLevel = value ? this.#latestBrightness || 100 : 0;
+          this.#writer.submit(nextLevel);
+          this.#service.updateCharacteristic(Brightness, nextLevel);
+          debugSetResult(On, this.#service, value);
+        }),
+      );
 
     this.#service
       .getCharacteristic(Brightness)
-      .onGet(async () => {
-        debugGet(Brightness, this.#service);
-        const data = await this.read();
-        const level = getTydomDataPropValue<number>(data, "level");
-        debugGetResult(Brightness, this.#service, level);
-        return level;
-      })
-      .onSet((value) => {
-        debugSet(Brightness, this.#service, value);
-        this.#latestBrightness = value as number;
-        this.#writer.submit(value as number);
-        debugSetResult(Brightness, this.#service, value);
-      });
+      .onGet(
+        this.guardRead(async () => {
+          debugGet(Brightness, this.#service);
+          const data = await this.read();
+          const level = getTydomDataPropValue<number>(data, "level");
+          debugGetResult(Brightness, this.#service, level);
+          return level;
+        }),
+      )
+      .onSet(
+        this.guardWrite((value) => {
+          debugSet(Brightness, this.#service, value);
+          this.#latestBrightness = value as number;
+          this.#writer.submit(value as number);
+          debugSetResult(Brightness, this.#service, value);
+        }),
+      );
   }
 
   protected override apply(updates: Record<string, unknown>[]): void {

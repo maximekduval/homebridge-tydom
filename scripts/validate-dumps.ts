@@ -10,7 +10,7 @@
  * Dumps are not committed (they carry room names and device ids from real
  * homes); point this at wherever yours live.
  *
- * Usage: pnpm tsx scripts/validate-dumps.ts [dump-dir]
+ * Usage: npx tsx scripts/validate-dumps.ts [dump-dir]
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { extname, join } from "node:path";

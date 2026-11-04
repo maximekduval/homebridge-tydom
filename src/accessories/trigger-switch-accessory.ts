@@ -24,24 +24,26 @@ export class TriggerSwitchAccessory extends BaseAccessory {
 
     this.#service
       .getCharacteristic(On)
-      .onSet(async (value) => {
-        debugSet(On, this.#service, value);
-        if (!value) {
-          return;
-        }
-        await this.api.putDeviceData(this.deviceId, this.endpointId, [
-          { name: "levelCmd", value: "TOGGLE" },
-        ]);
-        debugSetResult(On, this.#service, value);
+      .onSet(
+        this.guardWrite(async (value) => {
+          debugSet(On, this.#service, value);
+          if (!value) {
+            return;
+          }
+          await this.api.putDeviceData(this.deviceId, this.endpointId, [
+            { name: "levelCmd", value: "TOGGLE" },
+          ]);
+          debugSetResult(On, this.#service, value);
 
-        // Tracked rather than a bare setTimeout, so a shutdown or a
-        // re-registration mid-pulse does not leave it pending.
-        this.clearTimer(this.#resetTimer);
-        this.#resetTimer = this.setTimer(() => {
-          this.#resetTimer = undefined;
-          this.#service.updateCharacteristic(On, false);
-        }, delay);
-      })
+          // Tracked rather than a bare setTimeout, so a shutdown or a
+          // re-registration mid-pulse does not leave it pending.
+          this.clearTimer(this.#resetTimer);
+          this.#resetTimer = this.setTimer(() => {
+            this.#resetTimer = undefined;
+            this.#service.updateCharacteristic(On, false);
+          }, delay);
+        }),
+      )
       .updateValue(false);
   }
 

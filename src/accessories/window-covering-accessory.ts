@@ -53,49 +53,59 @@ export class WindowCoveringAccessory extends BaseAccessory {
       },
     });
 
-    this.#service.getCharacteristic(PositionState).onGet(() => {
-      debugGet(PositionState, this.#service);
-      // The gateway does not report travel direction, only a position.
-      const nextValue = PositionState.STOPPED;
-      debugGetResult(PositionState, this.#service, nextValue);
-      return nextValue;
-    });
+    this.#service.getCharacteristic(PositionState).onGet(
+      this.guardRead(() => {
+        debugGet(PositionState, this.#service);
+        // The gateway does not report travel direction, only a position.
+        const nextValue = PositionState.STOPPED;
+        debugGetResult(PositionState, this.#service, nextValue);
+        return nextValue;
+      }),
+    );
 
-    this.#service.getCharacteristic(HoldPosition).onSet(async (value) => {
-      debugSet(HoldPosition, this.#service, value);
-      if (!value) {
-        return;
-      }
-      // Stop overrides anything buffered — the user wants it to halt now, not
-      // to finish travelling to a position they have abandoned.
-      this.#writer.dispose();
-      debugTydomPut("positionCmd", this.accessory, "STOP");
-      await this.api.putDeviceData(this.deviceId, this.endpointId, [
-        { name: "positionCmd", value: "STOP" },
-      ]);
-      debugSetResult(HoldPosition, this.#service, value, "STOP");
-    });
+    this.#service.getCharacteristic(HoldPosition).onSet(
+      this.guardWrite(async (value) => {
+        debugSet(HoldPosition, this.#service, value);
+        if (!value) {
+          return;
+        }
+        // Stop overrides anything buffered — the user wants it to halt now, not
+        // to finish travelling to a position they have abandoned.
+        this.#writer.dispose();
+        debugTydomPut("positionCmd", this.accessory, "STOP");
+        await this.api.putDeviceData(this.deviceId, this.endpointId, [
+          { name: "positionCmd", value: "STOP" },
+        ]);
+        debugSetResult(HoldPosition, this.#service, value, "STOP");
+      }),
+    );
 
-    this.#service.getCharacteristic(CurrentPosition).onGet(async () => {
-      debugGet(CurrentPosition, this.#service);
-      const nextValue = await this.#readPosition();
-      debugGetResult(CurrentPosition, this.#service, nextValue);
-      return nextValue;
-    });
+    this.#service.getCharacteristic(CurrentPosition).onGet(
+      this.guardRead(async () => {
+        debugGet(CurrentPosition, this.#service);
+        const nextValue = await this.#readPosition();
+        debugGetResult(CurrentPosition, this.#service, nextValue);
+        return nextValue;
+      }),
+    );
 
     this.#service
       .getCharacteristic(TargetPosition)
-      .onGet(async () => {
-        debugGet(TargetPosition, this.#service);
-        const nextValue = await this.#readPosition();
-        debugGetResult(TargetPosition, this.#service, nextValue);
-        return nextValue;
-      })
-      .onSet((value) => {
-        debugSet(TargetPosition, this.#service, value);
-        this.#writer.submit(value as number);
-        debugSetResult(TargetPosition, this.#service, value);
-      });
+      .onGet(
+        this.guardRead(async () => {
+          debugGet(TargetPosition, this.#service);
+          const nextValue = await this.#readPosition();
+          debugGetResult(TargetPosition, this.#service, nextValue);
+          return nextValue;
+        }),
+      )
+      .onSet(
+        this.guardWrite((value) => {
+          debugSet(TargetPosition, this.#service, value);
+          this.#writer.submit(value as number);
+          debugSetResult(TargetPosition, this.#service, value);
+        }),
+      );
   }
 
   protected override apply(updates: Record<string, unknown>[], type: TydomUpdateType): void {

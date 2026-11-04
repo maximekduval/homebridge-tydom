@@ -1,6 +1,6 @@
 import type { AccessoryDeps } from "../src/accessories/base.js";
 import type { TydomCommand, TydomMetaElement } from "../src/api/types.js";
-import { createHapStatics, FakeAccessory, type FakeService } from "./hap-double.js";
+import { createHapStatics, fakeHapApi, FakeAccessory, type FakeService } from "./hap-double.js";
 
 export type TydomProp = { name: string; value: unknown };
 export type HapStatics = ReturnType<typeof createHapStatics>;
@@ -70,6 +70,7 @@ export const createAccessoryHarness = (options: HarnessOptions = {}) => {
     platform: {
       Service: hap.Service,
       Characteristic: hap.Characteristic,
+      api: fakeHapApi,
       config: { staleAfterMs: options.staleAfterMs ?? 0 },
       log: {
         info: record("info"),

@@ -12,7 +12,7 @@
  * test/device-type.spec.ts is a characterisation test rather than a tautology.
  * Regenerating inputs preserves any existing expectations by signature hash.
  *
- * Usage: pnpm tsx scripts/build-fixtures.ts [dump-dir] [out-file]
+ * Usage: npx tsx scripts/build-fixtures.ts [dump-dir] [out-file]
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";

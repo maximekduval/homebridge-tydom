@@ -1,30 +1,33 @@
 <!-- markdownlint-disable no-inline-html -->
 
-# homebridge-tydom
+# Homebridge Tydom MK
 
 <p align="center">
-  <a href="https://github.com/mgcrea/homebridge-tydom">
-    <img src="https://raw.githubusercontent.com/mgcrea/homebridge-tydom/main/docs/homebridge-tydom_small.png" height="320" alt="Homebridge Tydom Logo" />
+  <a href="https://github.com/maximekduval/homebridge-tydom">
+    <img src="https://raw.githubusercontent.com/maximekduval/homebridge-tydom/main/docs/homebridge-tydom_small.png" height="320" alt="Homebridge Tydom Logo" />
   </a>
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/homebridge-tydom">
-    <img src="https://img.shields.io/npm/v/homebridge-tydom.svg?style=for-the-badge" alt="npm version" />
+  <a href="https://www.npmjs.com/package/homebridge-tydom-mk">
+    <img src="https://img.shields.io/npm/v/homebridge-tydom-mk.svg?style=for-the-badge" alt="npm version" />
   </a>
-  <a href="https://www.npmjs.com/package/homebridge-tydom">
-    <img src="https://img.shields.io/npm/dt/homebridge-tydom.svg?style=for-the-badge" alt="npm total downloads" />
+  <a href="https://www.npmjs.com/package/homebridge-tydom-mk">
+    <img src="https://img.shields.io/npm/l/homebridge-tydom-mk.svg?style=for-the-badge" alt="npm license" />
   </a>
-  <a href="https://www.npmjs.com/package/homebridge-tydom">
-    <img src="https://img.shields.io/npm/dm/homebridge-tydom.svg?style=for-the-badge" alt="npm monthly downloads" />
-  </a>
-  <a href="https://www.npmjs.com/package/homebridge-tydom">
-    <img src="https://img.shields.io/npm/l/homebridge-tydom.svg?style=for-the-badge" alt="npm license" />
-  </a>
-  <a href="https://github.com/mgcrea/homebridge-tydom/actions/workflows/ci.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/mgcrea/homebridge-tydom/ci.yml?style=for-the-badge" alt="github ci workflow" />
+  <a href="https://github.com/maximekduval/homebridge-tydom/actions/workflows/ci.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/maximekduval/homebridge-tydom/ci.yml?style=for-the-badge" alt="github ci workflow" />
   </a>
 </p>
+
+This is a personal fork of [mgcrea/homebridge-tydom](https://github.com/mgcrea/homebridge-tydom) (MIT), published on npm as **`homebridge-tydom-mk`**. It adds stability fixes on top of upstream, mainly around the connection to the gateway:
+
+- no more "This plugin threw an error from the characteristic ... Socket instance is closing/closed" when the Home app is opened while Delta Dore's relay has just dropped the connection: HomeKit gets the last known state;
+- read and write failures reach HomeKit as "No Response" instead of unhandled errors;
+- the plugin reconnects by itself with a wait capped at one minute, and abandons a connection attempt that hangs, so the accessories come back after an outage without restarting Homebridge;
+- at startup it keeps retrying until the gateway answers, instead of giving up after half an hour.
+
+See [CHANGELOG.md](CHANGELOG.md) for the details, and [Switching from homebridge-tydom](#switching-from-homebridge-tydom) to move over without losing your rooms and automations.
 
 ---
 
@@ -57,7 +60,7 @@ Install through the Homebridge UI, or add the plugin to your Homebridge install 
   "private": true,
   "description": "This file keeps track of which plugins should be installed.",
   "dependencies": {
-    "homebridge-tydom": "^0.30.0"
+    "homebridge-tydom-mk": "^1.0.0"
   }
 }
 ```
@@ -100,7 +103,7 @@ With `email` set, `password` is read as your **Delta Dore account** password: at
 The account has to already own that gateway. To check a pair without waiting on Homebridge:
 
 ```bash
-pnpm resolve-credentials you@example.com 'YourDeltaDoreAccountPassw0rd' 001A25123456
+npm run resolve-credentials -- you@example.com 'YourDeltaDoreAccountPassw0rd' 001A25123456
 ```
 
 If you would rather extract the gateway password by hand, you still can, by inspecting the app's traffic with an SSL proxy following [this guide](https://github.com/mgcrea/homebridge-tydom/issues/72#issuecomment-1315036089) from @aure-olivier.
@@ -277,6 +280,16 @@ Reported working by the community:
 
 Also published: outlets, garage door openers, smoke detectors and temperature sensors. Devices are matched on the shape of the metadata the gateway reports, so similar hardware generally works untouched — and adding a new match is a small change, so please open an issue if yours is not recognised.
 
+## Switching from homebridge-tydom
+
+The platform keeps its `"platform": "Tydom"` name, so the configuration does not change and Homebridge hands the cached accessories over to the new plugin: rooms, names, scenes and automations are kept.
+
+1. In the Homebridge UI, uninstall `homebridge-tydom`. Keep its configuration when asked.
+2. Install `homebridge-tydom-mk`.
+3. Restart Homebridge. The log says the plugin name of each accessory changed from `homebridge-tydom` to `homebridge-tydom-mk`.
+
+Never have both plugins installed at once: they declare the same platform.
+
 ## Migrating to v0.30
 
 Nothing in your config needs to change, and no accessory is re-registered: rooms, names and automations survive the upgrade. What changed:
@@ -342,10 +355,12 @@ Upload the resulting `tydom_output.json` to a [gist](https://gist.github.com). A
 ## Development
 
 ```sh
-pnpm install
-pnpm test        # lint, type-check, spec and format:check
-pnpm build
+npm install
+npm test        # lint, type-check, spec and format:check
+npm run build
 ```
+
+Releases are described in [RELEASING.md](RELEASING.md).
 
 | Script | Description |
 | --- | --- |
@@ -359,7 +374,9 @@ pnpm build
 
 ## Authors
 
-**Olivier Louvignes**
+Fork maintained by **maximekduval** (<https://github.com/maximekduval>).
+
+Original plugin by **Olivier Louvignes**
 
 - <http://olouv.com>
 - <http://github.com/mgcrea>
@@ -370,6 +387,7 @@ pnpm build
 The MIT License
 
 Copyright (c) 2020 Olivier Louvignes <olivier@mgcrea.io>
+Copyright (c) 2026 maximekduval
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -32,14 +32,14 @@ npx tydom-client request /configs/file /devices/data /devices/meta /devices/cmet
 ```
 Will create the file `tydom_output.json` to upload, you can use https://gist.github.com
 
-An homebridge log with [debug enabled](https://github.com/mgcrea/homebridge-tydom#debug) while using the tydom official app (to trace working requests) can also help a lot.
+An homebridge log with [debug enabled](https://github.com/maximekduval/homebridge-tydom#debugging) while using the tydom official app (to trace working requests) can also help a lot.
 -->
 
 **Versions**
 
 <!-- Please make sure you are using the latest available version published on npm. -->
 
-- homebridge-tydom: `v0.x.x`
+- homebridge-tydom-mk: `v1.x.x`
 
 **Additional context**
 

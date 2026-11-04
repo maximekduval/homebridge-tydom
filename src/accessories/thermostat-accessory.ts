@@ -101,133 +101,150 @@ export class ThermostatAccessory extends BaseAccessory {
       .setProps({
         validValues: this.#canCool ? [0, 1, 2] : [0, 1],
       } as Partial<CharacteristicProps>)
-      .onGet(async () => {
-        debugGet(CurrentHeatingCoolingState, this.#service);
-        const data = await this.#read();
-        const authorization = getTydomDataPropValue<TydomDeviceThermostatAuthorization>(
-          data,
-          "authorization",
-        );
-        // Both may be absent on a thermic-level-only endpoint, and this state
-        // is a comparison between them, so there is nothing to decide. OFF is
-        // already what the characteristic reports for a unit that is
-        // authorised but not currently demanding.
-        const setpoint = findTydomDataPropValue<number | null>(data, "setpoint");
-        const temperature = findTydomDataPropValue<number | null>(data, "temperature");
-        // Symmetrical with the heating case: this characteristic reports what
-        // the device is doing now, not what it is allowed to do, so an
-        // authorised unit sitting at its setpoint reads OFF either way.
-        let nextValue: number = CurrentHeatingCoolingState.OFF;
-        if (typeof setpoint !== "number" || typeof temperature !== "number") {
+      .onGet(
+        this.guardRead(async () => {
+          debugGet(CurrentHeatingCoolingState, this.#service);
+          const data = await this.#read();
+          const authorization = getTydomDataPropValue<TydomDeviceThermostatAuthorization>(
+            data,
+            "authorization",
+          );
+          // Both may be absent on a thermic-level-only endpoint, and this state
+          // is a comparison between them, so there is nothing to decide. OFF is
+          // already what the characteristic reports for a unit that is
+          // authorised but not currently demanding.
+          const setpoint = findTydomDataPropValue<number | null>(data, "setpoint");
+          const temperature = findTydomDataPropValue<number | null>(data, "temperature");
+          // Symmetrical with the heating case: this characteristic reports what
+          // the device is doing now, not what it is allowed to do, so an
+          // authorised unit sitting at its setpoint reads OFF either way.
+          let nextValue: number = CurrentHeatingCoolingState.OFF;
+          if (typeof setpoint !== "number" || typeof temperature !== "number") {
+            debugGetResult(CurrentHeatingCoolingState, this.#service, nextValue);
+            return nextValue;
+          }
+          if (authorization === "HEATING" && setpoint > temperature) {
+            nextValue = CurrentHeatingCoolingState.HEAT;
+          } else if (authorization === "COOLING" && temperature > setpoint) {
+            nextValue = CurrentHeatingCoolingState.COOL;
+          }
           debugGetResult(CurrentHeatingCoolingState, this.#service, nextValue);
           return nextValue;
-        }
-        if (authorization === "HEATING" && setpoint > temperature) {
-          nextValue = CurrentHeatingCoolingState.HEAT;
-        } else if (authorization === "COOLING" && temperature > setpoint) {
-          nextValue = CurrentHeatingCoolingState.COOL;
-        }
-        debugGetResult(CurrentHeatingCoolingState, this.#service, nextValue);
-        return nextValue;
-      });
+        }),
+      );
 
     this.#service
       .getCharacteristic(TargetHeatingCoolingState)
       .setProps({
         validValues: this.#canCool ? [0, 1, 2] : [0, 1],
       } as Partial<CharacteristicProps>)
-      .onGet(async () => {
-        debugGet(TargetHeatingCoolingState, this.#service);
-        const data = await this.#read();
-        const hvacMode = getTydomDataPropValue<TydomDeviceThermostatHvacMode>(data, this.#modeProp);
-        const authorization = getTydomDataPropValue<TydomDeviceThermostatAuthorization>(
-          data,
-          "authorization",
-        );
-        let nextValue: number = TargetHeatingCoolingState.OFF;
-        if (hvacMode === "NORMAL" && authorization === "HEATING") {
-          nextValue = TargetHeatingCoolingState.HEAT;
-        } else if (hvacMode === "NORMAL" && authorization === "COOLING") {
-          nextValue = TargetHeatingCoolingState.COOL;
-        }
-        debugGetResult(TargetHeatingCoolingState, this.#service, nextValue);
-        return nextValue;
-      })
-      .onSet(async (value) => {
-        debugSet(TargetHeatingCoolingState, this.#service, value);
-        const wantsCool = this.#canCool && value === TargetHeatingCoolingState.COOL;
-        const isOn =
-          wantsCool ||
-          [TargetHeatingCoolingState.HEAT, TargetHeatingCoolingState.AUTO].includes(
-            value as number,
+      .onGet(
+        this.guardRead(async () => {
+          debugGet(TargetHeatingCoolingState, this.#service);
+          const data = await this.#read();
+          const hvacMode = getTydomDataPropValue<TydomDeviceThermostatHvacMode>(
+            data,
+            this.#modeProp,
           );
-        const hvacMode = isOn ? "NORMAL" : "STOP";
+          const authorization = getTydomDataPropValue<TydomDeviceThermostatAuthorization>(
+            data,
+            "authorization",
+          );
+          let nextValue: number = TargetHeatingCoolingState.OFF;
+          if (hvacMode === "NORMAL" && authorization === "HEATING") {
+            nextValue = TargetHeatingCoolingState.HEAT;
+          } else if (hvacMode === "NORMAL" && authorization === "COOLING") {
+            nextValue = TargetHeatingCoolingState.COOL;
+          }
+          debugGetResult(TargetHeatingCoolingState, this.#service, nextValue);
+          return nextValue;
+        }),
+      )
+      .onSet(
+        this.guardWrite(async (value) => {
+          debugSet(TargetHeatingCoolingState, this.#service, value);
+          const wantsCool = this.#canCool && value === TargetHeatingCoolingState.COOL;
+          const isOn =
+            wantsCool ||
+            [TargetHeatingCoolingState.HEAT, TargetHeatingCoolingState.AUTO].includes(
+              value as number,
+            );
+          const hvacMode = isOn ? "NORMAL" : "STOP";
 
-        // `authorization` is written only by a device that advertises cooling.
-        // On a radiator this stays a single-property write, exactly as before —
-        // whether the gateway even accepts a write to `authorization` is
-        // untested on hardware that has no use for one.
-        const values: { name: string; value: unknown }[] = [
-          { name: this.#modeProp, value: hvacMode },
-        ];
-        if (this.#canCool) {
-          values.push({
-            name: "authorization",
-            value: isOn ? (wantsCool ? "COOLING" : "HEATING") : "STOP",
-          });
-        }
-        await this.api.putDeviceData(this.deviceId, this.endpointId, values);
-        debugSetResult(TargetHeatingCoolingState, this.#service, value, hvacMode);
+          // `authorization` is written only by a device that advertises cooling.
+          // On a radiator this stays a single-property write, exactly as before —
+          // whether the gateway even accepts a write to `authorization` is
+          // untested on hardware that has no use for one.
+          const values: { name: string; value: unknown }[] = [
+            { name: this.#modeProp, value: hvacMode },
+          ];
+          if (this.#canCool) {
+            values.push({
+              name: "authorization",
+              value: isOn ? (wantsCool ? "COOLING" : "HEATING") : "STOP",
+            });
+          }
+          await this.api.putDeviceData(this.deviceId, this.endpointId, values);
+          debugSetResult(TargetHeatingCoolingState, this.#service, value, hvacMode);
 
-        // The gateway does not echo a current-state change, so reflect it now.
-        const current = wantsCool
-          ? CurrentHeatingCoolingState.COOL
-          : isOn
-            ? CurrentHeatingCoolingState.HEAT
-            : CurrentHeatingCoolingState.OFF;
-        this.#service.getCharacteristic(CurrentHeatingCoolingState).updateValue(current);
-      });
+          // The gateway does not echo a current-state change, so reflect it now.
+          const current = wantsCool
+            ? CurrentHeatingCoolingState.COOL
+            : isOn
+              ? CurrentHeatingCoolingState.HEAT
+              : CurrentHeatingCoolingState.OFF;
+          this.#service.getCharacteristic(CurrentHeatingCoolingState).updateValue(current);
+        }),
+      );
 
-    this.#service.getCharacteristic(CurrentTemperature).onGet(async () => {
-      debugGet(CurrentTemperature, this.#service);
-      // A device with no thermometer still has to answer this one, since
-      // HomeKit requires it on a Thermostat. The setpoint is the least wrong
-      // stand-in and reads as "at target", which is what no measurement means.
-      const data = await this.#read();
-      const temperature =
-        findTydomDataPropValue<number | null>(data, "temperature") ??
-        findTydomDataPropValue<number | null>(data, "setpoint") ??
-        UNKNOWN_TEMPERATURE;
-      debugGetResult(CurrentTemperature, this.#service, temperature);
-      return temperature;
-    });
+    this.#service.getCharacteristic(CurrentTemperature).onGet(
+      this.guardRead(async () => {
+        debugGet(CurrentTemperature, this.#service);
+        // A device with no thermometer still has to answer this one, since
+        // HomeKit requires it on a Thermostat. The setpoint is the least wrong
+        // stand-in and reads as "at target", which is what no measurement means.
+        const data = await this.#read();
+        const temperature =
+          findTydomDataPropValue<number | null>(data, "temperature") ??
+          findTydomDataPropValue<number | null>(data, "setpoint") ??
+          UNKNOWN_TEMPERATURE;
+        debugGetResult(CurrentTemperature, this.#service, temperature);
+        return temperature;
+      }),
+    );
 
     this.#service
       .getCharacteristic(TargetTemperature)
-      .onGet(async () => {
-        debugGet(TargetTemperature, this.#service);
-        const data = await this.#read();
-        // A device driven by thermic levels rather than a temperature — a towel
-        // rail, typically — reports `setpoint: null` permanently. The push path
-        // has always guarded that; this one did not, so every read handed HomeKit
-        // a null and HAP logged "supplied illegal value: null".
-        //
-        // Falling back to the measured temperature reads as "no demand", which
-        // is what a device with no setpoint actually means. Returning the
-        // characteristic's own value instead would just replay whatever null
-        // HomeKit was given first.
-        const setpoint =
-          findTydomDataPropValue<number | null>(data, "setpoint") ??
-          findTydomDataPropValue<number | null>(data, "temperature") ??
-          UNKNOWN_TEMPERATURE;
-        debugGetResult(TargetTemperature, this.#service, setpoint);
-        return setpoint;
-      })
-      .onSet(async (value) => {
-        debugSet(TargetTemperature, this.#service, value);
-        await this.api.putDeviceData(this.deviceId, this.endpointId, [{ name: "setpoint", value }]);
-        debugSetResult(TargetTemperature, this.#service, value);
-      });
+      .onGet(
+        this.guardRead(async () => {
+          debugGet(TargetTemperature, this.#service);
+          const data = await this.#read();
+          // A device driven by thermic levels rather than a temperature — a towel
+          // rail, typically — reports `setpoint: null` permanently. The push path
+          // has always guarded that; this one did not, so every read handed HomeKit
+          // a null and HAP logged "supplied illegal value: null".
+          //
+          // Falling back to the measured temperature reads as "no demand", which
+          // is what a device with no setpoint actually means. Returning the
+          // characteristic's own value instead would just replay whatever null
+          // HomeKit was given first.
+          const setpoint =
+            findTydomDataPropValue<number | null>(data, "setpoint") ??
+            findTydomDataPropValue<number | null>(data, "temperature") ??
+            UNKNOWN_TEMPERATURE;
+          debugGetResult(TargetTemperature, this.#service, setpoint);
+          return setpoint;
+        }),
+      )
+      .onSet(
+        this.guardWrite(async (value) => {
+          debugSet(TargetTemperature, this.#service, value);
+          await this.api.putDeviceData(this.deviceId, this.endpointId, [
+            { name: "setpoint", value },
+          ]);
+          debugSetResult(TargetTemperature, this.#service, value);
+        }),
+      );
 
     this.#setupThermicLevels();
   }
@@ -374,27 +391,31 @@ export class ThermostatAccessory extends BaseAccessory {
 
     service
       .getCharacteristic(On)
-      .onGet(async () => {
-        debugGet(On, service);
-        const data = await this.#read();
-        const nextValue =
-          subtype === "hvacMode_absence"
-            ? getTydomDataPropValue<TydomDeviceThermostatHvacMode>(data, this.#modeProp) ===
-              "ANTI_FROST"
-            : getTydomDataPropValue<TydomDeviceThermostatThermicLevel>(data, "thermicLevel") ===
-              tydomValue;
-        debugGetResult(On, service, nextValue);
-        return nextValue;
-      })
-      .onSet(async (value) => {
-        debugSet(On, service, value);
-        const tydomMode = value ? tydomValue : "NORMAL";
-        await this.#writeHvacMode(tydomMode);
-        debugSetResult(On, service, value, tydomMode);
-        if (value) {
-          this.#selectLevel(tydomValue);
-        }
-      });
+      .onGet(
+        this.guardRead(async () => {
+          debugGet(On, service);
+          const data = await this.#read();
+          const nextValue =
+            subtype === "hvacMode_absence"
+              ? getTydomDataPropValue<TydomDeviceThermostatHvacMode>(data, this.#modeProp) ===
+                "ANTI_FROST"
+              : getTydomDataPropValue<TydomDeviceThermostatThermicLevel>(data, "thermicLevel") ===
+                tydomValue;
+          debugGetResult(On, service, nextValue);
+          return nextValue;
+        }),
+      )
+      .onSet(
+        this.guardWrite(async (value) => {
+          debugSet(On, service, value);
+          const tydomMode = value ? tydomValue : "NORMAL";
+          await this.#writeHvacMode(tydomMode);
+          debugSetResult(On, service, value, tydomMode);
+          if (value) {
+            this.#selectLevel(tydomValue);
+          }
+        }),
+      );
   }
 }
 

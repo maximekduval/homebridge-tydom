@@ -108,27 +108,31 @@ export class MappedAccessory extends BaseAccessory {
       target.setProps(props);
     }
 
-    target.onGet(async () => {
-      debugGet(characteristic, service);
-      const data = await this.read();
-      const raw = getTydomDataPropValue(data, prop);
-      const value = toHomeKit ? toHomeKit(raw as never) : (raw as CharacteristicValue);
-      debugGetResult(characteristic, service, value);
-      return value;
-    });
+    target.onGet(
+      this.guardRead(async () => {
+        debugGet(characteristic, service);
+        const data = await this.read();
+        const raw = getTydomDataPropValue(data, prop);
+        const value = toHomeKit ? toHomeKit(raw as never) : (raw as CharacteristicValue);
+        debugGetResult(characteristic, service, value);
+        return value;
+      }),
+    );
 
     if (!toTydom) {
       return;
     }
-    target.onSet(async (value) => {
-      debugSet(characteristic, service, value);
-      const tydomValue = toTydom(value);
-      await this.api.putDeviceData(this.deviceId, this.endpointId, [
-        { name: prop, value: tydomValue },
-      ]);
-      debugSetResult(characteristic, service, value, tydomValue);
-      this.#trackAutoShutdown(binding, value);
-    });
+    target.onSet(
+      this.guardWrite(async (value) => {
+        debugSet(characteristic, service, value);
+        const tydomValue = toTydom(value);
+        await this.api.putDeviceData(this.deviceId, this.endpointId, [
+          { name: prop, value: tydomValue },
+        ]);
+        debugSetResult(characteristic, service, value, tydomValue);
+        this.#trackAutoShutdown(binding, value);
+      }),
+    );
   }
 
   /**
