@@ -6,9 +6,10 @@
  * physically moves, make it stutter.
  *
  * `leading` matters more than it looks: with it on, the first write goes out
- * immediately, so a single tap moves the shutter now rather than 250 ms from
- * now. It is what makes the plugin feel responsive, and is on for the two
- * accessories that drive moving hardware.
+ * immediately, so a single tap changes the light now rather than 250 ms from
+ * now. It is what makes a dimmer feel responsive, and is on for the lightbulb.
+ * The shutter leaves it off on purpose: a leading write would start it
+ * travelling to wherever the finger first landed.
  *
  * Flushes are chained rather than merely debounced, because the gateway applies
  * writes in arrival order with no revision check — two in flight at once can

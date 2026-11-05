@@ -26,6 +26,7 @@ const CHARACTERISTIC_CONSTANTS: Record<string, Record<string, number>> = {
   CurrentHeatingCoolingState: { OFF: 0, HEAT: 1, COOL: 2 },
   TargetHeatingCoolingState: { OFF: 0, HEAT: 1, COOL: 2, AUTO: 3 },
   CurrentDoorState: { OPEN: 0, CLOSED: 1, OPENING: 2, CLOSING: 3, STOPPED: 4 },
+  PositionState: { DECREASING: 0, INCREASING: 1, STOPPED: 2 },
   TargetDoorState: { OPEN: 0, CLOSED: 1 },
   SecuritySystemCurrentState: {
     STAY_ARM: 0,
