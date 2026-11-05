@@ -191,6 +191,12 @@ const FIRST_USAGE_MATCHES: Record<string, Match> = {
   light: { deviceType: "lightbulb", category: CATEGORY.LIGHTBULB },
   plug: { deviceType: "outlet", category: CATEGORY.OUTLET },
   shutter: { deviceType: "window-covering", category: CATEGORY.WINDOW_COVERING },
+  // The gateway's weather source, listed as `Invisible 1` with no picture,
+  // which suggests an internal service rather than a probe on the façade. Of
+  // the five properties it reports only `outTemperature` has a HomeKit equivalent;
+  // `weather` (a condition), `maxDailyOutTemp` and the two irradiation values
+  // (`currentPower` is not an instantaneous reading) are deliberately left out.
+  weather: { deviceType: "temperature-sensor", category: CATEGORY.SENSOR },
   window: { deviceType: "contact-sensor", category: CATEGORY.WINDOW },
 };
 

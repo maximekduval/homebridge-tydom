@@ -7,6 +7,14 @@ history of the versions before the fork is in the
 
 ## Unreleased
 
+- The gateway's weather source (`first_usage` `weather`, listed as `Invisible 1`)
+  is no longer ignored with a warning at every startup. It appears as a
+  temperature sensor with the outdoor temperature, named "Outdoor weather"
+  ("Météo extérieure" in French) unless `settings.<deviceId>.name` says
+  otherwise. The weather condition, the daily maximum and the irradiation
+  values are not exposed: HomeKit has no matching service. The accessory is
+  new, so nothing already in Home changes; add the device to `excludedDevices`
+  to leave it out.
 - The startup log is readable. It used to print four lines per accessory
   ("Found new device", "Adding new device", "Found new tydom device", "Updating
   accessory"), including the HomeKit UUID and a warning for every device type

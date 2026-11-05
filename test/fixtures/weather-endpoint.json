@@ -1,0 +1,126 @@
+{
+  "_comment": "The gateway's weather source, as a real Tydom reports it (read on 2026-11-05). Only this endpoint; the ids are replaced and nothing identifies a house.",
+  "/configs/file": {
+    "endpoints": [
+      {
+        "anticipation_start": false,
+        "first_usage": "weather",
+        "id_device": 1700000001,
+        "id_endpoint": 1700000001,
+        "last_usage": "weather",
+        "name": "Invisible 1",
+        "picto": "none",
+        "skill": "TYDOM_X3D",
+        "space_id": ""
+      }
+    ],
+    "groups": []
+  },
+  "/groups/file": { "groups": [] },
+  "/devices/meta": [
+    {
+      "id": 1700000001,
+      "endpoints": [
+        {
+          "id": 1700000001,
+          "error": 0,
+          "metadata": [
+            {
+              "name": "outTemperature",
+              "type": "numeric",
+              "permission": "r",
+              "validity": "SENSOR_SUPERVISION",
+              "shared": false,
+              "min": -327.67,
+              "max": 327.66,
+              "step": 0.01,
+              "unit": "degC"
+            },
+            {
+              "name": "weather",
+              "type": "string",
+              "permission": "r",
+              "validity": "SENSOR_SUPERVISION",
+              "shared": false,
+              "enum_values": [
+                "UNAVAILABLE",
+                "DAY_CLEAR_SKY",
+                "DAY_FEW_CLOUDS",
+                "DAY_SCATTERED_CLOUDS",
+                "DAY_BROKEN_CLOUDS",
+                "DAY_SHOWER_RAIN",
+                "DAY_RAIN",
+                "DAY_THUNDERSTORM",
+                "DAY_SNOW",
+                "DAY_MIST",
+                "NIGHT_CLEAR_SKY",
+                "NIGHT_FEW_CLOUDS",
+                "NIGHT_SCATTERED_CLOUDS",
+                "NIGHT_BROKEN_CLOUDS",
+                "NIGHT_SHOWER_RAIN",
+                "NIGHT_RAIN",
+                "NIGHT_THUNDERSTORM",
+                "NIGHT_SNOW",
+                "NIGHT_MIST"
+              ]
+            },
+            {
+              "name": "dailyPower",
+              "type": "numeric",
+              "permission": "r",
+              "validity": "SENSOR_SUPERVISION",
+              "shared": false,
+              "min": 0,
+              "max": 65534,
+              "step": 1,
+              "unit": "Wh/m2"
+            },
+            {
+              "name": "currentPower",
+              "type": "numeric",
+              "permission": "r",
+              "validity": "SENSOR_SUPERVISION",
+              "shared": false,
+              "min": 0,
+              "max": 65534,
+              "step": 1,
+              "unit": "Wh/m2"
+            },
+            {
+              "name": "maxDailyOutTemp",
+              "type": "numeric",
+              "permission": "r",
+              "validity": "SENSOR_SUPERVISION",
+              "shared": false,
+              "min": -327.67,
+              "max": 327.66,
+              "step": 0.01,
+              "unit": "degC"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "/devices/data": [
+    {
+      "id": 1700000001,
+      "endpoints": [
+        {
+          "id": 1700000001,
+          "error": 0,
+          "data": [
+            { "name": "outTemperature", "validity": "upToDate", "value": 12.19 },
+            { "name": "weather", "validity": "upToDate", "value": "DAY_BROKEN_CLOUDS" },
+            { "name": "dailyPower", "validity": "upToDate", "value": 2881 },
+            { "name": "currentPower", "validity": "upToDate", "value": 1422 },
+            { "name": "maxDailyOutTemp", "validity": "upToDate", "value": 14.14 }
+          ]
+        }
+      ]
+    }
+  ],
+  "/devices/cmeta": [
+    { "id": 1700000001, "endpoints": [{ "id": 1700000001, "error": 0, "cmetadata": [] }] }
+  ]
+}

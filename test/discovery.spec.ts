@@ -5,12 +5,17 @@ import {
   expandCompanions,
   type DiscoverDevicesInput,
 } from "../src/api/discovery.js";
-import type {
-  TydomCommandMetaResponse,
-  TydomConfigResponse,
-  TydomGroupsResponse,
-  TydomMetaResponse,
+import {
+  tydomCommandMetaResponseSchema,
+  tydomConfigResponseSchema,
+  tydomGroupsResponseSchema,
+  tydomMetaResponseSchema,
+  type TydomCommandMetaResponse,
+  type TydomConfigResponse,
+  type TydomGroupsResponse,
+  type TydomMetaResponse,
 } from "../src/api/types.js";
+import weather from "./fixtures/weather-endpoint.json" with { type: "json" };
 import { metadataFrom } from "./helpers.js";
 
 const SHUTTER_META = [
@@ -105,6 +110,25 @@ describe("discoverDevices", () => {
         reason: "unsupported",
       },
     ]);
+  });
+
+  it("exposes the gateway's weather source instead of reporting it unsupported", () => {
+    // Parsed through the schemas the controller uses, so this also shows a real
+    // gateway's answer is accepted as it is.
+    const { devices, skipped } = discoverDevices({
+      username: "012345GATEWAY",
+      config: tydomConfigResponseSchema.parse(weather["/configs/file"]),
+      groups: tydomGroupsResponseSchema.parse(weather["/groups/file"]),
+      meta: tydomMetaResponseSchema.parse(weather["/devices/meta"]),
+      cmeta: tydomCommandMetaResponseSchema.parse(weather["/devices/cmeta"]),
+    });
+    expect(skipped).toEqual([]);
+    expect(devices).toHaveLength(1);
+    expect(devices[0]).toMatchObject({
+      deviceType: "temperature-sensor",
+      category: CATEGORY.SENSOR,
+      firstUsage: "weather",
+    });
   });
 
   it("attaches the endpoint's group", () => {

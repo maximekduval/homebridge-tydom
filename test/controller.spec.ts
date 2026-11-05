@@ -9,6 +9,7 @@ import TydomController, {
 } from "../src/controller.js";
 import type { TydomPlatformConfig } from "../src/platform.js";
 import type { TydomAccessoryContext } from "../src/typings/tydom.js";
+import weather from "./fixtures/weather-endpoint.json" with { type: "json" };
 
 /**
  * Stand a controller up without a socket.
@@ -261,6 +262,38 @@ describe("TydomController", () => {
 
       const panel = contexts.find((context) => context.deviceType === "alarm");
       expect(panel?.commands?.map(({ name }) => name)).toEqual(["alarmCmd"]);
+    });
+
+    describe("the gateway's weather source", () => {
+      const WEATHER_ID = 1700000001;
+      const scanWeather = async (settings: Record<string, { name?: string }> = {}) => {
+        const { controller } = createController();
+        (controller.config as { settings: unknown }).settings = settings;
+        (controller.client as unknown as Record<string, unknown>)["get"] = async (uri: string) =>
+          (weather as Record<string, unknown>)[uri];
+        const contexts: TydomAccessoryContext[] = [];
+        controller.on("device", (context: TydomAccessoryContext) => contexts.push(context));
+        await controller.scan();
+        controller.dispose();
+        return { contexts, scan: controller.lastScan };
+      };
+
+      it("is announced as a temperature sensor named after what it measures", async () => {
+        // The gateway calls it `Invisible 1`, which would be the tile's name.
+        const { contexts, scan } = await scanWeather();
+        expect(contexts).toHaveLength(1);
+        expect(contexts[0]).toMatchObject({
+          deviceType: "temperature-sensor",
+          deviceId: WEATHER_ID,
+          name: "Météo extérieure",
+        });
+        expect(scan).toEqual({ total: 1, skipped: [] });
+      });
+
+      it("keeps a name the user chose", async () => {
+        const { contexts } = await scanWeather({ [WEATHER_ID]: { name: "Dehors" } });
+        expect(contexts[0]?.name).toBe("Dehors");
+      });
     });
   });
 });

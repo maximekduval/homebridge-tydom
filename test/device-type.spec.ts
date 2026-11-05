@@ -119,6 +119,24 @@ describe("resolveDeviceType", () => {
     expect(resolution?.category).toBe(CATEGORY.WINDOW_COVERING);
   });
 
+  it("resolves the gateway's weather source as an outdoor temperature sensor", () => {
+    // The names are what a real gateway reports for it. Only `outTemperature`
+    // has a HomeKit equivalent, which is what the temperature sensor reads.
+    const resolution = resolveDeviceType({
+      firstUsage: "weather",
+      metadata: metadataFrom([
+        "outTemperature",
+        "weather",
+        "dailyPower",
+        "currentPower",
+        "maxDailyOutTemp",
+      ]),
+      settings: {},
+    });
+    expect(resolution?.deviceType).toBe("temperature-sensor");
+    expect(resolution?.category).toBe(CATEGORY.SENSOR);
+  });
+
   it("returns undefined for hardware it does not recognise at all", () => {
     expect(
       resolveDeviceType({
