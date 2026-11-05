@@ -5,6 +5,24 @@ Changes of `homebridge-tydom-mk`, the fork of
 history of the versions before the fork is in the
 [upstream changelog](https://github.com/mgcrea/homebridge-tydom/blob/main/CHANGELOG.md).
 
+## 1.1.1
+
+- The slider of a shutter in the Home app no longer jumps back while the
+  shutter is moving. The gateway reports the real position of the shutter once
+  or twice during the travel, and the plugin took those reports for a new
+  target: the slider showed the position reached so far (88 on the way to 43,
+  for example) until the shutter arrived. The position you asked for now stays
+  on the slider until the shutter reaches it, you stop it, or the estimated
+  travel time has passed, and a read made by the Home app in the meantime
+  answers with it too.
+- The Home app shows "Opening" or "Closing" while a shutter travels. It always
+  said stopped.
+- Dragging the slider no longer sends the same position again and again.
+  HomeKit repeats the value at every tick, about once a second, while the
+  slider rests at an end stop, and each repeat was another request to the
+  gateway. A position identical to the one just sent is now dropped for three
+  seconds.
+
 ## 1.1.0
 
 - The gateway's weather source (`first_usage` `weather`, listed as `Invisible 1`)
