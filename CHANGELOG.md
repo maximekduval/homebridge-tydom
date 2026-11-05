@@ -5,6 +5,19 @@ Changes of `homebridge-tydom-mk`, the fork of
 history of the versions before the fork is in the
 [upstream changelog](https://github.com/mgcrea/homebridge-tydom/blob/main/CHANGELOG.md).
 
+## Unreleased
+
+- The startup log is readable. It used to print four lines per accessory
+  ("Found new device", "Adding new device", "Found new tydom device", "Updating
+  accessory"), including the HomeKit UUID and a warning for every device type
+  the plugin does not support. It now prints the device list once: one line per
+  accessory with its type, name and `deviceId`, `new` on the ones Homebridge did
+  not know, and a closing "Ready: ..." line that says what changed. A device the
+  plugin does not expose is named, with its type and `deviceId`.
+- The per-accessory details (UUID, context) and the devices excluded by your
+  settings are logged in debug mode only.
+- The warning when the gateway stops reporting an accessory now names it.
+
 ## 1.0.1
 
 - The settings page of the plugin in the Homebridge UI links to the README of

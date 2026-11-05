@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import type { Logging } from "homebridge";
 import type { Categories } from "homebridge";
 import { createTranslator, type Translator } from "./i18n/index.js";
-import { discoverDevices, expandCompanions } from "./api/discovery.js";
+import { discoverDevices, expandCompanions, type ScanReport } from "./api/discovery.js";
 import {
   classifyMessage,
   getAccessoryId,
@@ -103,6 +103,14 @@ export default class TydomController extends EventEmitter {
    * companion, since the primary always claimed the key first.
    */
   private emitted = new Set<string>();
+  /**
+   * What the last completed scan found, including the endpoints it left out.
+   *
+   * A property rather than the return value of `scan`, which announces the
+   * devices through events: the platform reads it once the announced devices
+   * have settled, to report them together.
+   */
+  lastScan: ScanReport | undefined;
   private refreshInterval: NodeJS.Timeout | undefined;
   private hasConnectedOnce = false;
   /**
@@ -157,7 +165,7 @@ export default class TydomController extends EventEmitter {
     // hostname/username/password are validated and resolved by parseConfig,
     // so there is nothing left to assert here.
     const { hostname, username, password, email } = config;
-    this.log.info(
+    debug(
       `Creating tydom client with username=${styleString(username)} and hostname=${styleString(hostname)}`,
     );
     // With an e-mail configured, `password` belongs to the account rather than
@@ -216,7 +224,7 @@ export default class TydomController extends EventEmitter {
         });
       } else {
         this.log.info(
-          `Successfully connected to Tydom hostname=${styleString(hostname)} with username=${styleString(username)}`,
+          `Connected to Tydom gateway ${styleString(username)} via ${styleString(hostname)}`,
         );
       }
       this.emit("connect");
@@ -367,7 +375,9 @@ export default class TydomController extends EventEmitter {
     // has connected yet, so there is no socket to migrate — only listeners.
     this.client.removeAllListeners();
     this.client = this.createClient(password);
-    this.log.info(`Resolved the gateway password for username=${styleString(username)}`);
+    this.log.info(
+      `Got the password of gateway ${styleString(username)} from your Delta Dore account`,
+    );
   }
   /** Whether a socket is up, however it got there. */
   get isConnected(): boolean {
@@ -452,7 +462,8 @@ export default class TydomController extends EventEmitter {
   }
   async scan(): Promise<void> {
     const { hostname, username, settings = {} } = this.config;
-    this.log.info(`Scanning devices from hostname=${styleString(hostname)}...`);
+    this.log.info("Reading the device list...");
+    debug(`Scanning devices from hostname=${styleString(hostname)}...`);
     const { config, groups, meta, cmeta } = await this.sync();
 
     const { devices, skipped } = discoverDevices({
@@ -470,27 +481,18 @@ export default class TydomController extends EventEmitter {
       },
     });
 
-    for (const skip of skipped) {
-      if (skip.reason === "unsupported") {
-        this.log.warn(
-          `Unsupported firstUsage="${skip.firstUsage}" for endpoint with deviceId="${skip.deviceId}"`,
-        );
-      }
-    }
+    // Left for the platform to report once, as part of its startup device list:
+    // a line per endpoint here read as four per accessory in the log.
+    this.lastScan = { total: config.endpoints.length, skipped };
 
     for (const device of devices.flatMap((d) => expandCompanions(d))) {
       const { uniqueId, deviceId, endpointId, firstUsage, category } = device;
-      this.log.info(
-        `Found new device with firstUsage=${styleString(firstUsage)}, deviceId=${styleNumber(
-          deviceId,
-        )} and endpointId=${styleNumber(endpointId)}`,
-      );
       if (this.emitted.has(device.accessoryId)) {
         continue;
       }
       this.emitted.add(device.accessoryId);
-      this.log.info(
-        `Adding new device with firstUsage=${styleString(firstUsage)}, deviceId=${styleNumber(
+      debug(
+        `Announcing device with firstUsage=${styleString(firstUsage)}, deviceId=${styleNumber(
           deviceId,
         )} and endpointId=${styleNumber(endpointId)}`,
       );

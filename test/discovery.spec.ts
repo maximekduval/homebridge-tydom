@@ -97,7 +97,13 @@ describe("discoverDevices", () => {
     const { devices, skipped } = discoverDevices(baseInput);
     expect(devices).toHaveLength(2);
     expect(skipped).toEqual([
-      { deviceId: 3, endpointId: 3, firstUsage: "somethingNew", reason: "unsupported" },
+      {
+        deviceId: 3,
+        endpointId: 3,
+        name: "Mystery",
+        firstUsage: "somethingNew",
+        reason: "unsupported",
+      },
     ]);
   });
 
