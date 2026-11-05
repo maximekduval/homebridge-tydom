@@ -14,6 +14,7 @@ import { ConfigError, parseConfig, type TydomConfig } from "./config.js";
 import { PLATFORM_NAME, PLUGIN_NAME } from "./config/env.js";
 import { createTranslator, type Translator } from "./i18n/index.js";
 import { createPluginLogger } from "./platform/logger.js";
+import { deviceTableLines, readyLine, type StartupRow } from "./platform/startup-report.js";
 import type { ControllerDevicePayload, ControllerUpdatePayload } from "./controller.js";
 import TydomController from "./controller.js";
 import { triggerWebhook, type NotificationPayload } from "./helpers/webhook.js";
@@ -44,6 +45,11 @@ export default class TydomPlatform implements DynamicPlatformPlugin {
    * told us nothing", and those look identical from the cleanup set alone.
    */
   discoveredDevices = 0;
+  /**
+   * One row per accessory the current scan announced, in the order the gateway
+   * listed them, for the device list logged once the scan has settled.
+   */
+  startupRows: StartupRow[] = [];
   accessories = new Map<string, PlatformAccessory<TydomAccessoryContext>>();
   /** Live handlers, keyed by the same UUID as `accessories`. */
   handlers = new Map<string, TydomAccessory>();
@@ -194,6 +200,8 @@ export default class TydomPlatform implements DynamicPlatformPlugin {
     assert(this.controller);
     this.cleanupAccessoriesIds = new Set(this.accessories.keys());
     this.discoveredDevices = 0;
+    this.startupRows = [];
+    this.controller.lastScan = undefined;
 
     // Never gives up: a Homebridge that boots before the network, or during a
     // Delta Dore outage, used to stop after ten attempts (about half an hour)
@@ -227,6 +235,10 @@ export default class TydomPlatform implements DynamicPlatformPlugin {
     }
 
     await this.settlePendingDevices();
+    // Only the accessories that made it: a handler that failed has already
+    // logged its error, and listing it as exposed would contradict that.
+    const rows = this.startupRows.filter(({ id }) => this.accessories.has(id));
+    this.logDeviceList(rows);
     // A scan that found nothing is not evidence that nothing is there. An
     // empty `/configs/file` parses into a perfectly valid zero-device scan, and
     // a firmware that renames the metadata the matcher keys on produces the
@@ -241,17 +253,45 @@ export default class TydomPlatform implements DynamicPlatformPlugin {
           `Tydom app, then restart Homebridge. Remove them from the Homebridge UI if ` +
           `they really are gone.`,
       );
-      this.log.info(`Properly loaded ${this.accessories.size}-accessories`);
+      this.log.info(
+        `Ready: ${this.accessories.size} kept from the previous run, none confirmed by the gateway`,
+      );
       return;
     }
+    let removed = 0;
     this.cleanupAccessoriesIds.forEach((accessoryId) => {
       const accessory = this.accessories.get(accessoryId);
       if (!accessory) return;
-      this.log.warn(`Deleting missing accessory with id=${styleNumber(accessoryId)}`);
+      this.log.warn(
+        `Removing ${styleString(accessory.displayName)} (id ${styleNumber(
+          accessory.context.deviceId,
+        )}): the gateway no longer reports it`,
+      );
       this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       this.forgetAccessory(accessoryId);
+      removed += 1;
     });
-    this.log.info(`Properly loaded ${this.accessories.size}-accessories`);
+    this.log.info(readyLine(this.accessories.size, rows, removed));
+  }
+
+  /**
+   * Log what the gateway reported and what is now exposed to HomeKit.
+   *
+   * The one place devices show up at info level, as one line each: the platform
+   * used to log four per accessory, and in no order a reader could follow.
+   */
+  private logDeviceList(rows: StartupRow[]): void {
+    const scan = this.controller?.lastScan;
+    for (const line of deviceTableLines(rows, scan)) {
+      this.log.info(line);
+    }
+    for (const { name, deviceId, firstUsage, reason } of scan?.skipped ?? []) {
+      if (reason === "filtered") {
+        this.log.debug(
+          `Excluded by your settings: ${styleString(name)} (firstUsage=${styleString(firstUsage)}, deviceId=${styleNumber(deviceId)})`,
+        );
+      }
+    }
   }
 
   /**
@@ -319,17 +359,29 @@ export default class TydomPlatform implements DynamicPlatformPlugin {
   async handleControllerDevice(context: ControllerDevicePayload): Promise<void> {
     const { name, deviceId, category, accessoryId } = context;
     const id = this.api.hap.uuid.generate(accessoryId);
-    this.log.info(
-      `Found new tydom device named=${styleString(name)} with deviceId=${styleNumber(deviceId)} (id=${styleKeyword(
-        id,
-      )})`,
-    );
     this.log.debug(
-      `Tydom with deviceId=${styleNumber(deviceId)} (id=${styleKeyword(id)}) context="${JSON.stringify(context)}"`,
+      `Tydom device named=${styleString(name)} with deviceId=${styleNumber(deviceId)} (id=${styleKeyword(id)}) context="${JSON.stringify(context)}"`,
     );
     const existingAccessory = this.accessories.get(id);
     const hasNewCategory = existingAccessory?.category !== category;
     debug(`[${deviceId}] ${existingAccessory?.category} vs ${category}`);
+    // Recorded before the first await, so the rows keep the order of the scan.
+    let status: StartupRow["status"] = "known";
+    if (!existingAccessory) {
+      status = "new";
+    } else if (hasNewCategory) {
+      status = "recreated";
+    }
+    this.startupRows.push({
+      id,
+      type: this.resolveDeviceType(context, category) ?? "unknown",
+      name:
+        existingAccessory && !hasNewCategory
+          ? existingAccessory.displayName
+          : this.accessoryNameFor(name, category, context.group),
+      deviceId,
+      status,
+    });
     this.discoveredDevices += 1;
     // Prevent automatic cleanup
     this.cleanupAccessoriesIds.delete(id);
@@ -338,7 +390,11 @@ export default class TydomPlatform implements DynamicPlatformPlugin {
         await this.updateAccessory(existingAccessory, context);
         return;
       } else {
-        this.log.warn(`Deleting accessory with new category with id=${styleNumber(accessoryId)}`);
+        this.log.warn(
+          `Recreating ${styleString(existingAccessory.displayName)} (id ${styleNumber(
+            deviceId,
+          )}): its HomeKit category changed`,
+        );
         this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [existingAccessory]);
         // Rebuilt under the same UUID two lines down, so its companion links
         // have to survive — the companion's own pass already wrote them.
@@ -397,6 +453,15 @@ export default class TydomPlatform implements DynamicPlatformPlugin {
     );
   }
 
+  /** The HomeKit name of a new accessory: a window takes the name of its group. */
+  private accessoryNameFor(
+    name: string,
+    category: Categories,
+    group: TydomAccessoryContext["group"],
+  ): string {
+    return category === CATEGORY.WINDOW && group ? group.name || name : name;
+  }
+
   async createAccessory(
     name: string,
     id: string,
@@ -404,12 +469,11 @@ export default class TydomPlatform implements DynamicPlatformPlugin {
     context: TydomAccessoryContext,
   ): Promise<PlatformAccessory<TydomAccessoryContext>> {
     const { platformAccessory: PlatformAccessory } = this.api;
-    const { group } = context;
-    const accessoryName = category === CATEGORY.WINDOW && group ? group.name || name : name;
-    this.log.info(
-      `Creating accessory named=${styleString(accessoryName)}, deviceId="${styleNumber(
+    const accessoryName = this.accessoryNameFor(name, category, context.group);
+    this.log.debug(
+      `Creating accessory named=${styleString(accessoryName)}, deviceId=${styleNumber(
         context.deviceId,
-      )} (id=${styleKeyword(id)})"`,
+      )} (id=${styleKeyword(id)})`,
     );
     const accessory = new PlatformAccessory<TydomAccessoryContext>(accessoryName, id, category);
     Object.assign(accessory.context, context);
@@ -428,10 +492,10 @@ export default class TydomPlatform implements DynamicPlatformPlugin {
     context: TydomAccessoryContext,
   ): Promise<void> {
     const { displayName: accessoryName, UUID: id } = accessory;
-    this.log.info(
+    this.log.debug(
       `Updating accessory named=${styleString(accessoryName)}, deviceId=${styleNumber(
         context.deviceId,
-      )} (id=${styleKeyword(id)})"`,
+      )} (id=${styleKeyword(id)})`,
     );
     if (!(await this.configureHandler(accessory, context))) {
       return;

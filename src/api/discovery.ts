@@ -54,9 +54,18 @@ export type DiscoveredDevice = {
 export type SkippedEndpoint = {
   deviceId: number;
   endpointId: number;
+  /** The name the gateway gives the endpoint, so a log line can say what was left out. */
+  name: string;
   firstUsage: string;
   reason: "filtered" | "unsupported";
   signatureHash?: string;
+};
+
+/** What one scan found, kept for the startup report. */
+export type ScanReport = {
+  /** Endpoints the gateway listed, before any filtering. */
+  total: number;
+  skipped: SkippedEndpoint[];
 };
 
 export type DiscoveryResult = {
@@ -135,11 +144,11 @@ export const discoverDevices = (input: DiscoverDevicesInput): DiscoveryResult =>
     } = endpoint;
 
     if (includedDevices.length > 0 && !stringIncludes(includedDevices, deviceId)) {
-      skipped.push({ deviceId, endpointId, firstUsage, reason: "filtered" });
+      skipped.push({ deviceId, endpointId, name: deviceName, firstUsage, reason: "filtered" });
       continue;
     }
     if (excludedDevices.length > 0 && stringIncludes(excludedDevices, deviceId)) {
-      skipped.push({ deviceId, endpointId, firstUsage, reason: "filtered" });
+      skipped.push({ deviceId, endpointId, name: deviceName, firstUsage, reason: "filtered" });
       continue;
     }
 
@@ -166,18 +175,18 @@ export const discoverDevices = (input: DiscoverDevicesInput): DiscoveryResult =>
           })();
 
     if (!resolution) {
-      skipped.push({ deviceId, endpointId, firstUsage, reason: "unsupported" });
+      skipped.push({ deviceId, endpointId, name: deviceName, firstUsage, reason: "unsupported" });
       continue;
     }
 
     const { deviceType, category, impliedSettings } = resolution;
 
     if (includedCategories.length > 0 && !stringIncludes(includedCategories, category)) {
-      skipped.push({ deviceId, endpointId, firstUsage, reason: "filtered" });
+      skipped.push({ deviceId, endpointId, name: deviceName, firstUsage, reason: "filtered" });
       continue;
     }
     if (excludedCategories.length > 0 && stringIncludes(excludedCategories, category)) {
-      skipped.push({ deviceId, endpointId, firstUsage, reason: "filtered" });
+      skipped.push({ deviceId, endpointId, name: deviceName, firstUsage, reason: "filtered" });
       continue;
     }
 

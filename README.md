@@ -165,11 +165,17 @@ They take precedence over the corresponding config fields.
 | `settings` | `Record<deviceId, object>` | `{}` | Per-device overrides. See [Device settings](#device-settings). |
 | `debug` | `boolean` | `false` | Log every gateway request and every characteristic read and write. |
 
-Device ids are printed in the Homebridge log at startup:
+Device ids are printed in the Homebridge log at startup, one line per accessory:
 
 ```text
-[Tydom] Found new tydom device named="Kitchen" with deviceId=1234567 (id=…)
+[Tydom] Gateway reports 2 devices, exposing 2 accessories to HomeKit:
+[Tydom]   window-covering  Kitchen      id 1234567
+[Tydom]   window-covering  Living room  id 1234568  new
+[Tydom] Ready: 2 accessories (1 new, 1 up to date)
 ```
+
+A device the plugin cannot expose is named on a `Not exposed:` line, with its
+Tydom usage and id, so you can tell what is missing and ask for it.
 
 Environment variables:
 

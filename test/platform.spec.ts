@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from "node:util";
 import type { API as Homebridge, Logging, PlatformConfig } from "homebridge";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CATEGORY } from "../src/api/device-type.js";
@@ -79,11 +80,18 @@ const createFakeApi = () => {
 
 const createFakeLog = () => {
   const messages: string[] = [];
+  /** What reaches the log at the default level, i.e. without debug. */
+  const infos: string[] = [];
   const log = ((message: string) => messages.push(message)) as unknown as Logging & {
     messages: string[];
+    infos: string[];
   };
   log.messages = messages;
-  log.info = (message: string) => messages.push(message);
+  log.infos = infos;
+  log.info = (message: string) => {
+    messages.push(message);
+    infos.push(message);
+  };
   log.warn = (message: string) => messages.push(message);
   log.error = (message: string) => messages.push(message);
   log.debug = (message: string) => messages.push(message);
@@ -191,8 +199,63 @@ describe("TydomPlatform", () => {
     };
     await platform.didFinishLaunching();
     expect(platform.accessories.size).toBe(3);
-    expect(log.messages).toContain("Properly loaded 3-accessories");
+    expect(log.messages).toContain("Ready: 3 accessories (3 new)");
     expectNoPrematureUpdate(calls);
+  });
+
+  /**
+   * The log used to carry four info lines per accessory, none of them saying
+   * what was new, and named a device it left out only by its `firstUsage`.
+   */
+  it("reports each accessory on one info line, with its deviceId and what was left out", async () => {
+    const { platform, log } = createPlatform();
+    const controller = platform.controller!;
+    controller.scan = async () => {
+      controller.emit("device", deviceContext({ accessoryId: "a", name: "Cuisine", deviceId: 11 }));
+      controller.emit("device", deviceContext({ accessoryId: "b", name: "Salon", deviceId: 22 }));
+      controller.lastScan = {
+        total: 3,
+        skipped: [
+          {
+            deviceId: 33,
+            endpointId: 33,
+            name: "Mystery",
+            firstUsage: "somethingNew",
+            reason: "unsupported",
+          },
+        ],
+      };
+    };
+    await platform.didFinishLaunching();
+
+    const infos = log.infos.map((line) => stripVTControlCharacters(line));
+    expect(infos).toEqual(
+      expect.arrayContaining([
+        "Gateway reports 3 devices (1 not supported), exposing 2 accessories to HomeKit:",
+        "  lightbulb  Cuisine  id 11  new",
+        "  lightbulb  Salon    id 22  new",
+        "Not exposed: Mystery (somethingNew, id 33), this type of device is not supported yet",
+        "Ready: 2 accessories (2 new)",
+      ]),
+    );
+    // Once each, not once per step of the handler.
+    expect(infos.filter((line) => line.includes("Cuisine"))).toHaveLength(1);
+    expect(infos.filter((line) => line.includes("Salon"))).toHaveLength(1);
+  });
+
+  it("marks only the accessory the cache did not know as new", async () => {
+    const known = deviceContext({ accessoryId: "a", name: "Lampe Salon", deviceId: 11 });
+    const added = deviceContext({ accessoryId: "b", name: "Lampe Cuisine", deviceId: 22 });
+    const { platform, log } = createPlatform([known, added]);
+    const cached = new FakePlatformAccessory("Lampe Salon", "uuid:a", CATEGORY.LIGHTBULB);
+    Object.assign(cached.context, known);
+    platform.configureAccessory(cached as never);
+    await platform.didFinishLaunching();
+
+    const infos = log.infos.map((line) => stripVTControlCharacters(line));
+    expect(infos).toContain("  lightbulb  Lampe Salon    id 11");
+    expect(infos).toContain("  lightbulb  Lampe Cuisine  id 22  new");
+    expect(infos).toContain("Ready: 2 accessories (1 new, 1 up to date)");
   });
 
   it("updates rather than re-registers an accessory Homebridge restored", async () => {
@@ -222,7 +285,8 @@ describe("TydomPlatform", () => {
     expect(disposed).toContain("uuid:a");
     expect(platform.accessories.has("uuid:b")).toBe(true);
     // The count used to include what the sweep had just removed.
-    expect(log.messages).toContain("Properly loaded 1-accessories");
+    expect(log.messages).toContain("Ready: 1 accessory (1 removed, 1 up to date)");
+    expect(log.messages.join("\n")).toMatch(/Removing .*Lampe Salon.* the gateway no longer/);
     expect(calls.filter((call) => call.op === "unregister")).toEqual([
       { op: "unregister", uuids: ["uuid:a"] },
     ]);
