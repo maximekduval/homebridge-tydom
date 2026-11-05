@@ -5,7 +5,7 @@ Changes of `homebridge-tydom-mk`, the fork of
 history of the versions before the fork is in the
 [upstream changelog](https://github.com/mgcrea/homebridge-tydom/blob/main/CHANGELOG.md).
 
-## Unreleased
+## 1.1.0
 
 - The gateway's weather source (`first_usage` `weather`, listed as `Invisible 1`)
   is no longer ignored with a warning at every startup. It appears as a
