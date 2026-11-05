@@ -17,7 +17,7 @@ describe("WriteCoalescer", () => {
     vi.useRealTimers();
   });
 
-  describe("with leading edge (shutters, dimmers)", () => {
+  describe("with leading edge (dimmers)", () => {
     it("sends the first write immediately, so a tap moves the device now", async () => {
       const { sent, coalescer } = create(true);
       coalescer.submit(50);
