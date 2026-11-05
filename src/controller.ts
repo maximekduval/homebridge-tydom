@@ -2,7 +2,12 @@ import { EventEmitter } from "node:events";
 import type { Logging } from "homebridge";
 import type { Categories } from "homebridge";
 import { createTranslator, type Translator } from "./i18n/index.js";
-import { discoverDevices, expandCompanions, type ScanReport } from "./api/discovery.js";
+import {
+  discoverDevices,
+  expandCompanions,
+  type DiscoveredDevice,
+  type ScanReport,
+} from "./api/discovery.js";
 import {
   classifyMessage,
   getAccessoryId,
@@ -502,10 +507,7 @@ export default class TydomController extends EventEmitter {
         this.devices.set(uniqueId, category as Categories);
       }
       const context: TydomAccessoryContext = {
-        name:
-          device.deviceType === "alarm-sensors"
-            ? this.t("ALARME_ISSUES_OUVERTES", device.name)
-            : device.name,
+        name: this.accessoryName(device),
         category: category as Categories,
         deviceType: device.deviceType,
         metadata: device.metadata,
@@ -522,6 +524,23 @@ export default class TydomController extends EventEmitter {
       };
       this.emit("device", context);
     }
+  }
+  /**
+   * The name an accessory is announced under.
+   *
+   * Discovery stays framework-free, so the names that come from the locale
+   * tables are filled in here. A name the user set in `settings` always wins.
+   */
+  private accessoryName(device: DiscoveredDevice): string {
+    if (device.deviceType === "alarm-sensors") {
+      return this.t("ALARME_ISSUES_OUVERTES", device.name);
+    }
+    // The gateway names its weather source `Invisible 1`, which would be the
+    // tile's name in the Home app.
+    if (device.firstUsage === "weather" && device.settings.name === undefined) {
+      return this.t("PLUGIN_OUTDOOR_WEATHER", device.name);
+    }
+    return device.name;
   }
   async refresh(): Promise<void> {
     debug(`Refreshing Tydom controller ...`);

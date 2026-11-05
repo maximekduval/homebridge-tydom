@@ -284,6 +284,8 @@ Reported working by the community:
 
 - Window coverings ([TYXIA 5630](https://www.deltadore.co.uk/home-automation/control-shutters-blinds-gate-garage/receiver-micromodule/tyxia-5630-ref-6351401), [TYXIA 5730](https://www.deltadore.co.uk/home-automation/control-shutters-blinds-gate-garage/receiver-micromodule/tyxia-5730-ref-6351402), [TYXIA 5731](https://www.deltadore.co.uk/home-automation/control-shutters-blinds-gate-garage/receiver-micromodule/tyxia-5731-ref-6351412))
 
+The gateway's weather source, which the gateway lists as `Invisible 1` with no picture, appears as a temperature sensor named "Outdoor weather" ("Météo extérieure" with `locale` set to `fr`). Only the outdoor temperature is exposed: HomeKit has no weather service, and the daily maximum and the irradiation values do not map to one. The name and the missing picture suggest an internal weather service rather than a probe on your façade, so do not expect the reading of a sensor you installed. Rename it with `settings.<deviceId>.name`, or leave it out with `excludedDevices`.
+
 Also published: outlets, garage door openers, smoke detectors and temperature sensors. Devices are matched on the shape of the metadata the gateway reports, so similar hardware generally works untouched — and adding a new match is a small change, so please open an issue if yours is not recognised.
 
 ## Switching from homebridge-tydom

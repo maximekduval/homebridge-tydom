@@ -40,6 +40,7 @@ describe("createTranslator", () => {
       const t = createTranslator(locale);
       for (const key of [
         "ALARME_ISSUES_OUVERTES",
+        "PLUGIN_OUTDOOR_WEATHER",
         "DISCRETE_ALARM_V3",
         "PREALARM",
         "HVAC_INFO_ABSENCE",
