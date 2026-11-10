@@ -53,7 +53,7 @@ const createController = (clientFactory?: TydomClientFactory) => {
   const client = controller.client as unknown as Record<string, unknown>;
   client["connect"] = async () => {
     calls.push("connect");
-    return undefined;
+    emitClient(controller, "connect");
   };
   client["get"] = async (uri: string) => {
     calls.push(`get ${uri}`);
@@ -84,9 +84,7 @@ describe("TydomController", () => {
   });
 
   describe("connection state", () => {
-    it("tracks a socket it did not itself ask for", () => {
-      // tydom-client reconnects on its own, so a connection can appear without
-      // anyone here having called connect.
+    it("tracks the client's socket events", () => {
       const { controller } = createController();
       expect(controller.isConnected).toBe(false);
       emitClient(controller, "connect");
@@ -107,83 +105,14 @@ describe("TydomController", () => {
       expect(calls).toEqual([]);
       controller.dispose();
     });
-
-    it("collapses overlapping reconnections into one trailing resync", async () => {
-      // A flapping socket emits connect repeatedly. Each one used to start its
-      // own resync, all in flight together, each re-arming the interval the
-      // last had just installed.
-      const { controller, calls } = createController();
-      await reachFirstConnectionFor(controller);
-      calls.length = 0;
-
-      emitClient(controller, "connect");
-      emitClient(controller, "connect");
-      emitClient(controller, "connect");
-      await vi.advanceTimersByTimeAsync(1000);
-
-      // One run for the first, one queued for everything that arrived during
-      // it — not three.
-      expect(calls.filter((call) => call === "get /ping")).toHaveLength(2);
-      controller.dispose();
-    });
-
-    it("re-arms the refresh interval an unref'd timer would not hold open", async () => {
-      const { controller, calls } = createController();
-      await reachFirstConnectionFor(controller);
-      emitClient(controller, "disconnect");
-      calls.length = 0;
-
-      emitClient(controller, "connect");
-      await vi.advanceTimersByTimeAsync(1000);
-      expect(calls).toContain("post /refresh/all");
-
-      calls.length = 0;
-      await vi.advanceTimersByTimeAsync(60_000);
-      expect(calls).toContain("post /refresh/all");
-      controller.dispose();
-    });
   });
 
   describe("dispose", () => {
-    it("stops reacting to a client that reconnects anyway", async () => {
-      // client.close() cannot stop tydom-client: its socket close handler calls
-      // scheduleReconnect unconditionally, and the flag that would suppress it
-      // is only set by its own signal handler. So a reconnection after shutdown
-      // is expected — reacting to one is not.
-      const { controller, calls } = createController();
-      await reachFirstConnectionFor(controller);
-      controller.dispose();
-      calls.length = 0;
-
-      emitClient(controller, "connect");
-      await vi.advanceTimersByTimeAsync(1000);
-      expect(calls).toEqual([]);
-    });
-
     it("does not let a post-dispose refresh keep the process alive", async () => {
       const { controller, calls } = createController();
       await reachFirstConnectionFor(controller);
       controller.dispose();
       calls.length = 0;
-      await vi.advanceTimersByTimeAsync(180_000);
-      expect(calls).toEqual([]);
-    });
-
-    it("abandons a resync already in flight", async () => {
-      // Detaching listeners covers a reconnection that arrives after shutdown,
-      // but not a resync that was already running when it landed: that one has
-      // its own continuation and would re-arm the refresh interval the platform
-      // has just cleared.
-      const { controller, calls } = createController();
-      await reachFirstConnectionFor(controller);
-      emitClient(controller, "disconnect");
-
-      emitClient(controller, "connect");
-      // Land in the middle of the resync's opening 250 ms wait.
-      await vi.advanceTimersByTimeAsync(100);
-      controller.dispose();
-      calls.length = 0;
-
       await vi.advanceTimersByTimeAsync(180_000);
       expect(calls).toEqual([]);
     });
@@ -404,14 +333,93 @@ describe("reconnection", () => {
     outcome = "hang";
     clients.at(-1)!.emit("disconnect");
     await vi.advanceTimersByTimeAsync(5_000 + CONNECT_TIMEOUT_MS);
-    // The hung client was replaced, not reused.
-    expect(clients.length).toBeGreaterThan(before);
-    expect(clients[before - 1]!.closed).toBe(true);
+    // One replacement for the original drop and another for the hung attempt.
+    expect(clients.length).toBeGreaterThan(before + 1);
+    expect(clients[before]!.closed).toBe(true);
 
     outcome = "ok";
     await vi.advanceTimersByTimeAsync(10 * CONNECT_TIMEOUT_MS);
     expect(controller.isConnected).toBe(true);
     controller.dispose();
+  });
+
+  it("retries a timed-out resync even before the socket emits disconnect", async () => {
+    const { clients, factory } = fakeClients(() => "ok");
+    const { controller, messages } = createController(factory);
+    await reachFirstConnectionFor(controller);
+
+    clients.at(-1)!.emit("disconnect");
+    const failing = clients.at(-1)!;
+    vi.spyOn(failing, "post").mockRejectedValueOnce(new Error("Request timed out after 5000ms"));
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(failing.closed).toBe(true);
+    expect(controller.isConnected).toBe(false);
+    expect(messages.some((message) => message.includes("state re-synced"))).toBe(false);
+
+    failing.emit("disconnect");
+    const refresh = vi.spyOn(clients.at(-1)!, "post");
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(controller.isConnected).toBe(true);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(messages.filter((message) => message.includes("state re-synced"))).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    controller.dispose();
+  });
+
+  it("skips resync on a socket that drops before the first ping", async () => {
+    const { clients, factory } = fakeClients(() => "ok");
+    const { controller } = createController(factory);
+    await reachFirstConnectionFor(controller);
+    clients.at(-1)!.emit("disconnect");
+
+    const dropping = clients.at(-1)!;
+    const ping = vi.spyOn(dropping, "get");
+    dropping.once("connect", () => dropping.emit("disconnect"));
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(ping).not.toHaveBeenCalled();
+    expect(controller.isConnected).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(controller.isConnected).toBe(true);
+    controller.dispose();
+  });
+
+  it("does not resume resync after shutdown during the opening wait", async () => {
+    const { clients, factory } = fakeClients(() => "ok");
+    const { controller } = createController(factory);
+    await reachFirstConnectionFor(controller);
+    clients.at(-1)!.emit("disconnect");
+
+    const client = clients.at(-1)!;
+    const ping = vi.spyOn(client, "get");
+    client.once("connect", () => controller.dispose());
+    await vi.advanceTimersByTimeAsync(180_000);
+
+    expect(ping).not.toHaveBeenCalled();
+    expect(controller.isConnected).toBe(false);
+  });
+
+  it("closes a handshake that finishes after shutdown", async () => {
+    const { clients, factory } = fakeClients(() => "ok");
+    const { controller } = createController(factory);
+    await reachFirstConnectionFor(controller);
+    clients.at(-1)!.emit("disconnect");
+
+    const client = clients.at(-1)!;
+    vi.spyOn(client, "connect").mockImplementationOnce(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+      client.emit("connect");
+    });
+    const close = vi.spyOn(client, "close");
+    await vi.advanceTimersByTimeAsync(3_000);
+    controller.dispose();
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(close).toHaveBeenCalledTimes(2);
+    expect(controller.isConnected).toBe(false);
   });
 
   it("does not reconnect once disposed", async () => {

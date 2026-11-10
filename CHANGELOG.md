@@ -5,6 +5,13 @@ Changes of `homebridge-tydom-mk`, the fork of
 history of the versions before the fork is in the
 [upstream changelog](https://github.com/mgcrea/homebridge-tydom/blob/main/CHANGELOG.md).
 
+## 1.1.2
+
+- Tydom reconnects with a fresh client if the socket closes or a request times
+  out during synchronization. The plugin reports recovery and resumes
+  periodic refreshes after the gateway answers both the ping and the refresh
+  request.
+
 ## 1.1.1
 
 - The slider of a shutter in the Home app no longer jumps back while the
